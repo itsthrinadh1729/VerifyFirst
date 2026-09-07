@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VerifyFirst</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <!-- Header -->
+  <div class="header">
+    <div class="brand-container">
+      <img class="brand-logo" src="../assets/logo.svg" height="36" alt="VerifyFirst" />
+    </div>
+  </div>
+
+  <!-- Empty State View -->
+  <div id="view-empty" class="view active">
+    <div class="empty-container">
+      <div class="empty-icon">🔗</div>
+      <div class="empty-title">No links detected</div>
+      <div class="empty-subtitle">No external links were found in the current chat.</div>
+    </div>
+  </div>
+
+  <!-- Main Analysis View -->
+  <div id="view-main" class="view">
+    <div class="section-label">Link Analysis</div>
+
+    <div class="status-badge" id="status-badge">
+      <span id="status-text">✓ SAFE</span>
+    </div>
+
+    <div class="score-box">
+      <div class="score-num" id="score-num">0 / 100</div>
+      <div class="score-lbl">Risk Score</div>
+    </div>
+
+    <div class="url-box" id="url-box">https://example.com</div>
+
+    <div class="indicator-summary-note" id="indicator-summary-note">No suspicious indicators detected.</div>
+
+    <!-- Multiple Links Selector Section -->
+    <div id="multi-links-section" style="display: none;">
+      <div class="multi-links-title" id="multi-links-title">LINKS ANALYZED</div>
+      <div class="links-list" id="links-list"></div>
+    </div>
+
+    <button type="button" class="btn-action" id="btn-understand-more">View Details</button>
+    <div class="time-note">Checked just now</div>
+  </div>
+
+  <!-- Detailed Indicators View ("Understand More") -->
+  <div id="view-details" class="view">
+    <div class="details-nav">
+      <button type="button" class="btn-back" id="btn-back">← Back</button>
+      <div class="brand-container">
+        <img class="brand-logo" src="../assets/logo.svg" height="28" alt="VerifyFirst" />
+      </div>
+    </div>
+
+    <div class="status-badge" id="details-status-badge">
+      <span id="details-status-text">✓ SAFE</span>
+    </div>
+
+    <div class="score-box">
+      <div class="score-num" id="details-score-num">0 / 100</div>
+      <div class="score-lbl">Risk Score</div>
+    </div>
+
+    <div class="url-box" id="details-url-box">https://example.com</div>
+
+    <div class="section-label">Detected Indicators</div>
+    <div class="indicators-container" id="indicators-container"></div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
