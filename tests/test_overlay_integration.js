@@ -286,6 +286,124 @@ async function runAllTests() {
     ({ document }) => hasOverlay(document)
   ));
 
+
+  function getNavText(document) {
+    const host = document.getElementById("verifyfirst-overlay-host");
+    if (!host || !host.shadowRoot) return null;
+    const nav = host.shadowRoot.querySelector('.nav-controls span');
+    return nav ? nav.textContent : null;
+  }
+
+  function clickNext(document) {
+    const host = document.getElementById("verifyfirst-overlay-host");
+    if (!host || !host.shadowRoot) return;
+    const btn = host.shadowRoot.querySelector('.nav-controls button[aria-label="Next warning"]');
+    if (btn) btn.click();
+  }
+
+  function clickPrev(document) {
+    const host = document.getElementById("verifyfirst-overlay-host");
+    if (!host || !host.shadowRoot) return;
+    const btn = host.shadowRoot.querySelector('.nav-controls button[aria-label="Previous warning"]');
+    if (btn) btn.click();
+  }
+
+  // 11. One suspicious URL -> no navigation controls
+  record(await runOverlayTest(
+    "11. One suspicious URL -> no navigation controls",
+    ({ document, pushResult }) => {
+      simulateChat(document, "ChatSingle", ["https://single.com/"]);
+      setTimeout(() => {
+        pushResult({ url: "https://single.com/", status: "SUSPICIOUS", risk_score: 55 }, "ChatSingle");
+      }, 300);
+    },
+    ({ document }) => hasOverlay(document) && getNavText(document) === null
+  ));
+
+  // 12. Two suspicious URLs -> navigation shown, 1 of 2
+  record(await runOverlayTest(
+    "12. Two suspicious URLs -> navigation shown 1 of 2",
+    ({ document, pushResult }) => {
+      simulateChat(document, "ChatMulti", ["https://one.com/", "https://two.com/"]);
+      setTimeout(() => {
+        pushResult({ url: "https://one.com/", status: "SUSPICIOUS", risk_score: 55 }, "ChatMulti");
+        pushResult({ url: "https://two.com/", status: "SUSPICIOUS", risk_score: 55 }, "ChatMulti");
+      }, 300);
+    },
+    ({ document }) => hasOverlay(document) && getNavText(document) === "1 of 2"
+  ));
+
+  // 13. One suspicious + one dangerous -> navigation shown 1 of 2
+  record(await runOverlayTest(
+    "13. One suspicious + one dangerous -> navigation shown 1 of 2",
+    ({ document, pushResult }) => {
+      simulateChat(document, "ChatMulti2", ["https://one.com/", "https://two.com/"]);
+      setTimeout(() => {
+        pushResult({ url: "https://one.com/", status: "SUSPICIOUS", risk_score: 55 }, "ChatMulti2");
+        pushResult({ url: "https://two.com/", status: "DANGEROUS", risk_score: 95 }, "ChatMulti2");
+      }, 300);
+    },
+    ({ document }) => hasOverlay(document) && getNavText(document) === "1 of 2"
+  ));
+
+  // 14. SAFE + SUSPICIOUS + SAFE -> navigation NOT shown
+  record(await runOverlayTest(
+    "14. SAFE + SUSPICIOUS + SAFE -> navigation NOT shown",
+    ({ document, pushResult }) => {
+      simulateChat(document, "ChatSafeMix", ["https://safe1.com/", "https://susp.com/", "https://safe2.com/"]);
+      setTimeout(() => {
+        pushResult({ url: "https://safe1.com/", status: "SAFE", risk_score: 0 }, "ChatSafeMix");
+        pushResult({ url: "https://susp.com/", status: "SUSPICIOUS", risk_score: 55 }, "ChatSafeMix");
+        pushResult({ url: "https://safe2.com/", status: "SAFE", risk_score: 0 }, "ChatSafeMix");
+      }, 300);
+    },
+    ({ document }) => hasOverlay(document) && getNavText(document) === null
+  ));
+
+  // 15. Next and Previous wraparound
+  record(await runOverlayTest(
+    "15. Next and Previous wraparound",
+    ({ document, pushResult }) => {
+      simulateChat(document, "ChatNav", ["https://one.com/", "https://two.com/"]);
+      setTimeout(() => {
+        pushResult({ url: "https://one.com/", status: "SUSPICIOUS", risk_score: 55 }, "ChatNav");
+        pushResult({ url: "https://two.com/", status: "DANGEROUS", risk_score: 95 }, "ChatNav");
+        setTimeout(() => {
+          // Verify 1 of 2, then click Next
+          if (getNavText(document) !== "1 of 2") throw new Error("Expected 1 of 2");
+          clickNext(document);
+          setTimeout(() => {
+            // Verify 2 of 2, then click Next again to wraparound
+            if (getNavText(document) !== "2 of 2") throw new Error("Expected 2 of 2");
+            clickNext(document);
+            setTimeout(() => {
+              // Verify 1 of 2, then click Prev to wraparound backwards
+              if (getNavText(document) !== "1 of 2") throw new Error("Expected 1 of 2 after wraparound");
+              clickPrev(document);
+            }, 50);
+          }, 50);
+        }, 50);
+      }, 300);
+    },
+    ({ document }) => hasOverlay(document) && getNavText(document) === "2 of 2"
+  ));
+
+  // 16. Dismiss current -> current warning removed, next remaining displayed
+  record(await runOverlayTest(
+    "16. Dismiss current -> next displayed, 1 of 2 to 1 of 1",
+    ({ document, pushResult }) => {
+      simulateChat(document, "ChatDismiss", ["https://one.com/", "https://two.com/"]);
+      setTimeout(() => {
+        pushResult({ url: "https://one.com/", status: "SUSPICIOUS", risk_score: 55 }, "ChatDismiss");
+        pushResult({ url: "https://two.com/", status: "DANGEROUS", risk_score: 95 }, "ChatDismiss");
+        setTimeout(() => {
+          clickDismiss(document);
+        }, 50);
+      }, 300);
+    },
+    ({ document }) => hasOverlay(document) && getNavText(document) === null && getOverlayStatus(document) === 'DANGEROUS'
+  ));
+
   console.log(`\n${"═".repeat(50)}`);
   console.log(`Results: ${passCount} passed, ${failCount} failed, ${passCount + failCount} total`);
   console.log(`${"═".repeat(50)}`);

@@ -46,7 +46,7 @@ async def test_api_brand_impersonation(client):
 
 @pytest.mark.asyncio
 async def test_api_multi_rule(client):
-    url = "http://192.168.1.1:8080/path/to/something/very/long/that/triggers/excessive/length@example.com/test?q=" + ("a" * 150)
+    url = "http://user@192.168.1.1:8080/path/to/something/very/long/that/triggers/excessive/length_example.com/test?q=" + ("a" * 150)
     response = await client.post("/api/v1/analyze", json={"url": url})
     assert response.status_code == 200
     data = response.json()

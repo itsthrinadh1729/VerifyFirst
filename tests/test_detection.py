@@ -46,6 +46,33 @@ def test_rule_ip_address_host():
     assert "IP_ADDRESS_HOST" in rule_ids
 
 
+def test_rule_ip_address_alternate_formats():
+    """Verify IP_ADDRESS_HOST correctly handles octal, hex, int, and rejects normal domains."""
+    # Integer IPv4
+    res_int = analyze_url_security("http://3232235777/")
+    assert "IP_ADDRESS_HOST" in [r.rule for r in res_int.reasons]
+    
+    # Octal IPv4
+    res_octal = analyze_url_security("http://0300.0250.0001.0001/")
+    assert "IP_ADDRESS_HOST" in [r.rule for r in res_octal.reasons]
+    
+    # Hex IPv4
+    res_hex = analyze_url_security("http://0xc0.0xa8.0x01.0x01/")
+    assert "IP_ADDRESS_HOST" in [r.rule for r in res_hex.reasons]
+    
+    # IPv6 (existing)
+    res_v6 = analyze_url_security("http://[2001:db8::1]/")
+    assert "IP_ADDRESS_HOST" in [r.rule for r in res_v6.reasons]
+
+    # Should NOT trigger
+    res_normal = analyze_url_security("http://example.com/")
+    assert "IP_ADDRESS_HOST" not in [r.rule for r in res_normal.reasons]
+
+    res_numeric_domain = analyze_url_security("http://12345678.example.com/")
+    assert "IP_ADDRESS_HOST" not in [r.rule for r in res_numeric_domain.reasons]
+
+
+
 def test_rule_userinfo_at_symbol():
     """Verify USERINFO_AT_SYMBOL rule triggers with +25 points."""
     result = analyze_url_security("https://google.com@attacker.com/auth")
@@ -53,6 +80,16 @@ def test_rule_userinfo_at_symbol():
     assert result.status == "SAFE"
     rule_ids = [r.rule for r in result.reasons]
     assert "USERINFO_AT_SYMBOL" in rule_ids
+
+
+def test_rule_userinfo_at_symbol_false_positive():
+    """Verify @ in query or fragment does NOT trigger USERINFO_AT_SYMBOL."""
+    res_query = analyze_url_security("http://example.com/?q=@paypal")
+    assert "USERINFO_AT_SYMBOL" not in [r.rule for r in res_query.reasons]
+    
+    res_fragment = analyze_url_security("http://example.com/#@paypal")
+    assert "USERINFO_AT_SYMBOL" not in [r.rule for r in res_fragment.reasons]
+
 
 
 def test_rule_excessive_subdomains():

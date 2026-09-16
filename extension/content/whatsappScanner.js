@@ -403,14 +403,21 @@
             if (bubble.closest("header, footer, [role='menuitem'], [aria-hidden='true']"))
                 return;
             console.log("[VerifyFirst Source3] message bubble inspected");
-            const text = bubble.innerText || bubble.textContent || "";
+            let text = bubble.innerText;
+            if (typeof text !== "string") {
+                // Fallback for JSDOM testing
+                const clone = bubble.cloneNode(true);
+                const hidden = clone.querySelectorAll("[hidden], [aria-hidden='true']");
+                hidden.forEach(el => el.remove());
+                text = clone.textContent || "";
+            }
             if (!text.toLowerCase().includes("http://") && !text.toLowerCase().includes("https://"))
                 return;
             URL_TEXT_PATTERN.lastIndex = 0;
             let match;
             while ((match = URL_TEXT_PATTERN.exec(text)) !== null) {
                 console.log("[VerifyFirst Source3] URL candidate found");
-                const spaced = match[0].replace(/([)\](]+)(https?:\/\/)/gi, "$1 $2");
+                const spaced = match[0].replace(/([^\s])(https?:\/\/)/gi, "$1 $2");
                 const pieces = spaced.split(" ");
                 for (let piece of pieces) {
                     const canonicalUrl = processExtractedString(piece);
@@ -534,7 +541,7 @@
                     if (response.record.status !== "SAFE") {
                         if (typeof window !== "undefined" && window.VerifyFirstOverlay) {
                             try {
-                                window.VerifyFirstOverlay.showVerifyFirstWarning(response.record);
+                                window.VerifyFirstOverlay.showVerifyFirstWarning(response.record, Object.values(currentChatRecords));
                             }
                             catch (e) {
                                 console.error(`[VerifyFirst] Error displaying overlay: ${e?.message || e}`);
@@ -579,7 +586,7 @@
         // Trigger automatic warning for SUSPICIOUS, DANGEROUS, ANALYSIS_UNAVAILABLE
         if (typeof window !== "undefined" && window.VerifyFirstOverlay) {
             try {
-                window.VerifyFirstOverlay.showVerifyFirstWarning(record);
+                window.VerifyFirstOverlay.showVerifyFirstWarning(record, Object.values(currentChatRecords));
             }
             catch (e) {
                 console.error(`[VerifyFirst] Error displaying overlay: ${e?.message || e}`);

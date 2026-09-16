@@ -110,7 +110,12 @@ interface TabScanState {
 
     // Indicator Summary Note
     if (record.status === "SAFE") {
-      indicatorSummaryNote.textContent = "No suspicious indicators detected.";
+      const count = record.reasons.length;
+      if (count === 0) {
+        indicatorSummaryNote.textContent = "No suspicious indicators detected.";
+      } else {
+        indicatorSummaryNote.textContent = `${count} low-risk indicator${count === 1 ? "" : "s"} detected`;
+      }
     } else if (record.status === "SUSPICIOUS") {
       const count = record.reasons.length;
       indicatorSummaryNote.textContent = `${count} suspicious indicator${count === 1 ? "" : "s"} detected`;

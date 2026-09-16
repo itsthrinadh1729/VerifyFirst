@@ -27,6 +27,55 @@ class URLFeatures:
     hostname_tokens: list[str]
 
 
+def _normalize_ipv4(hostname: str) -> str | None:
+    """Normalize alternate IPv4 formats (hex, octal, int) to dotted decimal."""
+    if not hostname:
+        return None
+
+    parts = hostname.split('.')
+    if len(parts) > 4:
+        return None
+
+    # Exclude small purely decimal single-part hostnames like "12345" 
+    # to avoid flagging numeric local hostnames.
+    if len(parts) == 1 and hostname.isdigit() and not hostname.startswith('0'):
+        if int(hostname) < 16777216:
+            return None
+
+    numbers = []
+    for part in parts:
+        if not part:
+            return None
+        part_lower = part.lower()
+        try:
+            if part_lower.startswith('0x'):
+                numbers.append(int(part_lower, 16))
+            elif part_lower.startswith('0') and len(part_lower) > 1:
+                numbers.append(int(part_lower, 8))
+            else:
+                if not part_lower.isdigit():
+                    return None
+                numbers.append(int(part_lower, 10))
+        except ValueError:
+            return None
+
+    if not numbers:
+        return None
+
+    last = numbers.pop()
+    if last >= (256 ** (4 - len(numbers))):
+        return None
+
+    for n in numbers:
+        if n > 255:
+            return None
+
+    while len(numbers) < 4:
+        numbers.append((last >> (8 * (3 - len(numbers)))) & 0xFF)
+
+    return f"{numbers[0]}.{numbers[1]}.{numbers[2]}.{numbers[3]}"
+
+
 def _is_ip(hostname: str) -> bool:
     """Check whether a given hostname string is an IPv4 or IPv6 address."""
     clean_host = hostname.strip("[]")
@@ -34,7 +83,17 @@ def _is_ip(hostname: str) -> bool:
         ipaddress.ip_address(clean_host)
         return True
     except ValueError:
-        return False
+        pass
+        
+    normalized = _normalize_ipv4(clean_host)
+    if normalized:
+        try:
+            ipaddress.ip_address(normalized)
+            return True
+        except ValueError:
+            pass
+            
+    return False
 
 
 def _count_subdomains(hostname: str, is_ip: bool) -> int:
@@ -155,7 +214,7 @@ def extract_features(url: str) -> URLFeatures:
         host_length=len(host),
         num_subdomains=_count_subdomains(host, is_ip),
         num_hyphens_host=host.count("-"),
-        has_at_symbol="@" in url,
+        has_at_symbol="@" in (parsed.netloc or ""),
         num_dots_host=host.count("."),
         # Phase 5A new features
         is_punycode=_is_punycode(host),

@@ -160,7 +160,7 @@ async function runAllTests() {
           <span dir="ltr">https://one.com and https://two.com</span>
         </div>
       `,
-      expected: ["https://one.com/", "https://two.com/"]
+      expected: ["https://one.com", "https://two.com"]
     },
     {
       name: "10. Duplicate URL",
@@ -169,7 +169,7 @@ async function runAllTests() {
           <span dir="ltr">https://dup.com and https://dup.com</span>
         </div>
       `,
-      expected: ["https://dup.com/"]
+      expected: ["https://dup.com"]
     },
     {
       name: "11. URL containing legitimate punctuation",
@@ -188,6 +188,119 @@ async function runAllTests() {
         </div>
       `,
       expected: ["https://open.spotify.com/track/time"]
+    },
+    {
+      name: "A. Adjacent inline URLs",
+      html: `
+        <div class="message-in">
+          <span dir="ltr"><span>https://one.com</span><span>https://two.com</span></span>
+        </div>
+      `,
+      expected: ["https://one.com", "https://two.com"]
+    },
+    {
+      name: "B. Anchor containing nested markup",
+      html: `
+        <div class="message-in">
+          <span dir="ltr"><a href="https://example.com">https://<span>example</span>.com</a></span>
+        </div>
+      `,
+      expected: ["https://example.com"]
+    },
+    {
+      name: "C. Anchor + identical visible URL",
+      html: `
+        <div class="message-in">
+          <span dir="ltr"><a href="https://both.com/test">https://both.com/test</a></span>
+        </div>
+      `,
+      expected: ["https://both.com/test"]
+    },
+    {
+      name: "D. Anchor + different visible text",
+      html: `
+        <div class="message-in">
+          <span dir="ltr"><a href="https://example.com">Click https://other.com</a></span>
+        </div>
+      `,
+      expected: ["https://example.com"]
+    },
+    {
+      name: "E. Two independent plain-text URLs",
+      html: `
+        <div class="message-in">
+          <span dir="ltr">https://one.com https://two.com</span>
+        </div>
+      `,
+      expected: ["https://one.com", "https://two.com"]
+    },
+    {
+      name: "F. Duplicate plain-text URL",
+      html: `
+        <div class="message-in">
+          <span dir="ltr">https://one.com https://one.com</span>
+        </div>
+      `,
+      expected: ["https://one.com"]
+    },
+    {
+      name: "G. URL + WhatsApp timestamp",
+      html: `
+        <div class="message-in">
+          <span dir="ltr">http://192.168.1.1 10:45 AM</span>
+        </div>
+      `,
+      expected: ["http://192.168.1.1"]
+    },
+    {
+      name: "H. Encoded URL",
+      html: `
+        <div class="message-in">
+          <span dir="ltr">http://user@192.168.1.1/%2E%2E/%2E%2E/</span>
+        </div>
+      `,
+      expected: ["http://user@192.168.1.1/%2E%2E/%2E%2E/"]
+    },
+    {
+      name: "I. URL + multiple spaces + timestamp",
+      html: `
+        <div class="message-in">
+          <span dir="ltr">http://192.168.1.1    10:45 AM</span>
+        </div>
+      `,
+      expected: ["http://192.168.1.1"]
+    },
+    {
+      name: "J. URL + space + PM timestamp",
+      html: `
+        <div class="message-in">
+          <span dir="ltr">http://example.com 10:45 PM</span>
+        </div>
+      `,
+      expected: ["http://example.com"]
+    },
+    {
+      name: "K. Fragmented IP URL + timestamp",
+      html: `
+        <div class="message-in" data-testid="msg-container">
+          <div class="copyable-text" data-pre-plain-text="[10:45 AM, 9/8/2026] User: ">
+            <div dir="ltr"><span dir="ltr">http://</span><span dir="ltr">192.168.1.1</span></div>
+          </div>
+          <div><span dir="auto">10:45 AM</span></div>
+        </div>
+      `,
+      expected: ["http://192.168.1.1"]
+    },
+    {
+      name: "L. Two fragmented URLs in same bubble",
+      html: `
+        <div class="message-out" data-testid="msg-container">
+          <span dir="ltr">http://</span><span dir="ltr">10.0.0.1</span>
+          <span dir="ltr"> and </span>
+          <span dir="ltr">http://</span><span dir="ltr">10.0.0.2</span>
+        </div>
+      `,
+      expected: ["http://10.0.0.1", "http://10.0.0.2"]
     }
   ];
 
