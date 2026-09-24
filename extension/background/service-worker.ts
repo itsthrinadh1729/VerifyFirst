@@ -9,6 +9,12 @@
  * 5. Handle chat context isolation on conversation switch.
  */
 
+import { createSecurityEvent } from "./security/event.js";
+import { record as recordHistory, clear as clearHistory } from "./security/historyStore.js";
+import { getSecurityStatistics } from "./security/statistics.js";
+import { querySecurityHistory } from "./security/historyQuery.js";
+import { exportSecurityHistory } from "./security/export.js";
+
 interface DetectionReason {
   rule: string;
   message: string;
@@ -20,6 +26,7 @@ interface AnalysisRecord {
   risk_score: number | null;
   reasons: DetectionReason[];
   timestamp: number;
+  eventId?: string;
 }
 
 interface TabScanState {
@@ -36,7 +43,7 @@ const REQUEST_TIMEOUT_MS = 5000;
  * Storage accessor helper that prefers chrome.storage.session
  * with fallback to chrome.storage.local.
  */
-function getStorageArea(): chrome.storage.StorageArea {
+function getStorageArea(): any {
   if (chrome.storage && chrome.storage.session) {
     return chrome.storage.session;
   }
@@ -164,6 +171,9 @@ async function requestBackendAnalysis(url: string): Promise<AnalysisRecord> {
   }
 }
 
+// In-flight request tracker to deduplicate concurrent scans (6B)
+const inFlightAnalyses = new Map<string, Promise<AnalysisRecord>>();
+
 /**
  * Handles incoming URL analysis requests from content scripts.
  */
@@ -199,29 +209,63 @@ async function handleAnalyzeUrl(tabId: number, url: string): Promise<AnalysisRec
     return currentState.urls[trimmed];
   }
 
-  console.log(`[VerifyFirst] Backend analysis requested: ${trimmed} (generation=${capturedGeneration})`);
-
-  // Request backend analysis
-  const record = await requestBackendAnalysis(trimmed);
-
-  console.log(`[VerifyFirst] Backend response: status=${record.status}, risk_score=${record.risk_score}`);
-
-  // Re-fetch to ensure fresh state — check generation to prevent cross-chat contamination
-  const freshState = await getTabState(tabId);
-  if ((freshState.generation || 0) !== capturedGeneration) {
-    // Chat switched during analysis — discard result to prevent leaking into new chat
-    console.log(`[VerifyFirst] DISCARDED stale result: generation ${capturedGeneration} → ${freshState.generation}`);
-    return record;
+  const cacheKey = `${tabId}_${capturedGeneration}_${trimmed}`;
+  if (inFlightAnalyses.has(cacheKey)) {
+    console.log(`[VerifyFirst] Deduplicating concurrent request for: ${trimmed}`);
+    return inFlightAnalyses.get(cacheKey)!;
   }
 
-  freshState.urls[trimmed] = record;
-  await saveTabState(tabId, freshState);
+  console.log(`[VerifyFirst] Backend analysis requested: ${trimmed} (generation=${capturedGeneration})`);
 
-  return record;
+  const analysisPromise = (async () => {
+    try {
+      try {
+        const u = new URL(trimmed);
+        console.log(`[VerifyFirst][SW] Backend analysis started for hostname=${u.hostname}`);
+      } catch { }
+      // Request backend analysis
+      const record = await requestBackendAnalysis(trimmed);
+
+      console.log(`[VerifyFirst] Backend response: status=${record.status}, risk_score=${record.risk_score}`);
+
+      // Create and record SecurityEvent for history
+      try {
+        const secEvent = createSecurityEvent(record, trimmed);
+        if (secEvent) {
+          record.eventId = secEvent.id;
+          // Fire and forget, don't block protection flow
+          recordHistory(secEvent).catch(e => console.error("[VerifyFirst] Deferred history error:", e));
+        }
+      } catch (e) {
+        console.error("[VerifyFirst] Error dispatching security event", e);
+      }
+
+      // Re-fetch to ensure fresh state — check generation to prevent cross-chat contamination
+      const freshState = await getTabState(tabId);
+      if ((freshState.generation || 0) !== capturedGeneration) {
+        // Chat switched during analysis — discard result to prevent leaking into new chat
+        console.log(`[VerifyFirst] DISCARDED stale result: generation ${capturedGeneration} → ${freshState.generation}`);
+        return record;
+      }
+
+      // Do not cache UNAVAILABLE results so they can be retried automatically (Test 6)
+      if (record.status !== "ANALYSIS_UNAVAILABLE") {
+        freshState.urls[trimmed] = record;
+        await saveTabState(tabId, freshState);
+      }
+
+      return record;
+    } finally {
+      inFlightAnalyses.delete(cacheKey);
+    }
+  })();
+
+  inFlightAnalyses.set(cacheKey, analysisPromise);
+  return analysisPromise;
 }
 
 // Runtime message listener
-chrome.runtime.onMessage.addListener((message: any, sender: chrome.runtime.MessageSender, sendResponse: (response?: any) => void) => {
+chrome.runtime.onMessage.addListener((message: any, sender: any, sendResponse: any) => {
   if (!message || typeof message.type !== "string") {
     return false;
   }
@@ -233,6 +277,11 @@ chrome.runtime.onMessage.addListener((message: any, sender: chrome.runtime.Messa
       sendResponse({ error: "Unknown tab sender" });
       return false;
     }
+    const safeChatIdLog = message.chatId ? `length=${message.chatId.length}` : 'empty';
+    try {
+      const u = new URL(message.url);
+      console.log(`[VerifyFirst][SW] ANALYZE_URL received for hostname=${u.hostname}, chatId=${safeChatIdLog}`);
+    } catch { }
     console.log(`[VerifyFirst] ANALYZE_URL request received.`);
 
     // 14C: Message validation hardening
@@ -248,6 +297,10 @@ chrome.runtime.onMessage.addListener((message: any, sender: chrome.runtime.Messa
       // Two-way delivery: explicitly push result to content script
       // This is the PRIMARY overlay trigger — sendResponse callback is fallback
       try {
+        try {
+          const u = new URL(record.url);
+          console.log(`[VerifyFirst][SW] ANALYSIS_RESULT sent for hostname=${u.hostname}`);
+        } catch { }
         console.log(`[VerifyFirst] Sending ANALYSIS_RESULT to tab ${tabId}: status=${record.status}`);
         chrome.tabs.sendMessage(tabId, {
           type: "ANALYSIS_RESULT",
@@ -279,7 +332,7 @@ chrome.runtime.onMessage.addListener((message: any, sender: chrome.runtime.Messa
 
   if (message.type === "TRIGGER_SCAN") {
     // Forward scan trigger to the active tab's content script
-    chrome.tabs.query({ active: true, currentWindow: true }).then((tabs) => {
+    chrome.tabs.query({ active: true, currentWindow: true }).then((tabs: any[]) => {
       const activeTabId = tabs[0]?.id;
       if (activeTabId !== undefined) {
         chrome.tabs.sendMessage(activeTabId, { type: "TRIGGER_SCAN" }).catch(() => {
@@ -296,7 +349,7 @@ chrome.runtime.onMessage.addListener((message: any, sender: chrome.runtime.Messa
     if (targetTabId === -1) {
       // Find active tab if tabId wasn't passed directly
       if (chrome.tabs && chrome.tabs.query) {
-        chrome.tabs.query({ active: true, currentWindow: true }).then((tabs) => {
+        chrome.tabs.query({ active: true, currentWindow: true }).then((tabs: any[]) => {
           const activeTabId = tabs[0]?.id ?? -1;
           if (activeTabId !== -1) {
             getTabState(activeTabId).then((state) => {
@@ -318,7 +371,109 @@ chrome.runtime.onMessage.addListener((message: any, sender: chrome.runtime.Messa
     return true;
   }
 
+  // Module 7A: UI/API Contract handlers
+  if (message.type === "GET_SECURITY_STATISTICS") {
+    getSecurityStatistics().then(stats => {
+      sendResponse({ success: true, data: stats });
+    }).catch(err => {
+      console.error("[VerifyFirst] GET_SECURITY_STATISTICS failed:", err);
+      sendResponse({ success: false, error: "Security statistics could not be loaded." });
+    });
+    return true;
+  }
+
+  if (message.type === "QUERY_SECURITY_HISTORY") {
+    if (message.query && typeof message.query !== "object") {
+      sendResponse({ success: false, error: "Invalid security history query." });
+      return false;
+    }
+    querySecurityHistory(message.query || {}).then(events => {
+      sendResponse({ success: true, data: events });
+    }).catch(err => {
+      console.error("[VerifyFirst] QUERY_SECURITY_HISTORY failed:", err);
+      sendResponse({ success: false, error: "Security history could not be loaded." });
+    });
+    return true;
+  }
+
+  if (message.type === "EXPORT_SECURITY_HISTORY") {
+    exportSecurityHistory().then(jsonStr => {
+      sendResponse({ success: true, data: jsonStr });
+    }).catch(err => {
+      console.error("[VerifyFirst] EXPORT_SECURITY_HISTORY failed:", err);
+      sendResponse({ success: false, error: "Security history could not be exported." });
+    });
+    return true;
+  }
+
+  if (message.type === "CLEAR_SECURITY_HISTORY") {
+    clearHistory().then(() => {
+      sendResponse({ success: true, data: undefined });
+    }).catch(err => {
+      console.error("[VerifyFirst] CLEAR_SECURITY_HISTORY failed:", err);
+      sendResponse({ success: false, error: "Security history could not be cleared." });
+    });
+    return true;
+  }
+
+  if (message.type === "OPEN_SECURITY_CENTER") {
+    const targetTabId = tabId !== -1 ? tabId : undefined;
+    if (targetTabId !== undefined) {
+      chrome.tabs.sendMessage(targetTabId, message).catch(() => {});
+    } else {
+      chrome.tabs.query({ active: true, currentWindow: true }).then((tabs: any[]) => {
+        const activeTabId = tabs[0]?.id;
+        if (activeTabId !== undefined) {
+          chrome.tabs.sendMessage(activeTabId, message).catch(() => {});
+        }
+      });
+    }
+    sendResponse({ success: true });
+    return false;
+  }
+
+  if (message.type === "OPEN_SECURITY_EVENT") {
+    console.log(`[VerifyFirst] OPEN_SECURITY_EVENT received in SW, eventId=${message.eventId}`);
+    const targetTabId = tabId !== -1 ? tabId : undefined;
+    if (targetTabId !== undefined) {
+      chrome.tabs.sendMessage(targetTabId, message).catch(() => {});
+    } else {
+      chrome.tabs.query({ active: true, currentWindow: true }).then((tabs: any[]) => {
+        const activeTabId = tabs[0]?.id;
+        if (activeTabId !== undefined) {
+          chrome.tabs.sendMessage(activeTabId, message).catch(() => {});
+        }
+      });
+    }
+    sendResponse({ success: true });
+    return false;
+  }
+
+  // Test 5 requirement: Unknown message should respond with success: false
+  // However, returning `false` directly means the sender won't get a response at all 
+  // if another listener might handle it, but here we're the background script.
+  // Wait, if no one calls sendResponse, the sender receives undefined.
+  // Let's explicitly reply with success: false for any unhandled message that explicitly expects a response.
+  // Actually, we'll just fall through to return false. The test explicitly checks for `success: false`.
+  // Wait, if I do `sendResponse({ success: false, error: "Unknown message type." }); return false;`
+  sendResponse({ success: false, error: "Unknown message type." });
   return false;
 });
 
 console.log("VerifyFirst service worker initialized (Phase 2 Pre-interaction Detection)");
+
+chrome.action.onClicked.addListener(async (tab: any) => {
+  console.log("[VerifyFirst] Extension action clicked");
+  
+  if (tab.id === undefined) return;
+  console.log(`[VerifyFirst] Active tab: ${tab.id} / ${tab.url ? new URL(tab.url).hostname : 'unknown'}`);
+  
+  try {
+    await chrome.tabs.sendMessage(tab.id, { type: "OPEN_SECURITY_CENTER" });
+    console.log("[VerifyFirst] OPEN_SECURITY_CENTER sent to tab", tab.id);
+  } catch (err: any) {
+    console.warn(`[VerifyFirst] Failed to open Security Center on this tab: ${err.message || err}`);
+    // Fallback: Open the Security Center dashboard in a new tab
+    chrome.tabs.create({ url: chrome.runtime.getURL("security-center/security-center.html") });
+  }
+});

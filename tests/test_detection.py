@@ -75,7 +75,7 @@ def test_rule_ip_address_alternate_formats():
 
 def test_rule_userinfo_at_symbol():
     """Verify USERINFO_AT_SYMBOL rule triggers with +25 points."""
-    result = analyze_url_security("https://google.com@attacker.com/auth")
+    result = analyze_url_security("https://username@attacker.com/auth")
     assert result.risk_score == 25
     assert result.status == "SAFE"
     rule_ids = [r.rule for r in result.reasons]
@@ -124,7 +124,7 @@ def test_rule_excessive_host_hyphens():
 def test_additive_scoring_and_classification():
     """Verify multiple rules sum additively and change classification."""
     # IP (40) + @ (25) = 65 -> SUSPICIOUS
-    url_suspicious = "http://legit-service.com@192.168.1.1/auth"
+    url_suspicious = "http://username@192.168.1.1/auth"
     res_suspicious = analyze_url_security(url_suspicious)
     assert res_suspicious.risk_score == 65
     assert res_suspicious.status == "SUSPICIOUS"
@@ -134,7 +134,7 @@ def test_additive_scoring_and_classification():
     assert "USERINFO_AT_SYMBOL" in rule_ids_susp
 
     # IP (40) + @ (25) + Length > 200 (10) = 75 -> DANGEROUS
-    url_dangerous = "http://legit-service.com@192.168.1.1/login?" + ("param=" + "x" * 190)
+    url_dangerous = "http://username@192.168.1.1/login?" + ("param=" + "x" * 190)
     res_dangerous = analyze_url_security(url_dangerous)
     assert res_dangerous.risk_score == 75
     assert res_dangerous.status == "DANGEROUS"
@@ -469,3 +469,589 @@ def test_phase5b_combination_cases():
     # BRAND_IMPERSONATION (35) + EXCESSIVE_HOST_HYPHENS (10) + EXCESSIVE_URL_LENGTH (10) = 55
     # Depending on thresholds, could be 55 (SUSPICIOUS)
     assert result.risk_score >= 55
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Module 1 — Advanced URL Structural Analysis
+# ═══════════════════════════════════════════════════════════════════
+
+
+def test_module1_ipv4_and_ipv6_classification():
+    """IPv4 and IPv6 should be distinguished correctly."""
+
+    ipv4 = extract_features(
+        "http://192.168.1.1/login"
+    )
+
+    assert ipv4.is_ip_address is True
+    assert ipv4.is_ipv4_address is True
+    assert ipv4.is_ipv6_address is False
+
+    ipv6 = extract_features(
+        "http://[2001:db8::1]/login"
+    )
+
+    assert ipv6.is_ip_address is True
+    assert ipv6.is_ipv4_address is False
+    assert ipv6.is_ipv6_address is True
+
+
+def test_module1_hostname_normalization():
+    """Hostname casing and trailing root-label dot should normalize."""
+
+    features = extract_features(
+        "https://EXAMPLE.COM./login"
+    )
+
+    assert features.host == "example.com"
+    assert features.normalized_host == "example.com"
+    assert features.registered_domain == "example.com"
+
+
+def test_module1_subdomain_depth():
+    """Subdomain depth should be calculated relative to registered domain."""
+
+    features = extract_features(
+        "https://login.security.verify.example.com/account"
+    )
+
+    assert features.registered_domain == "example.com"
+    assert features.subdomain_depth == 3
+
+
+def test_module1_registered_domain_with_co_uk():
+    """Two-part public suffix handling should remain intact."""
+
+    features = extract_features(
+        "https://login.example.co.uk/account"
+    )
+
+    assert features.registered_domain == "example.co.uk"
+    assert features.subdomain_depth == 1
+
+
+def test_module1_non_standard_port():
+    """Non-standard web ports should be detected."""
+
+    standard_https = extract_features(
+        "https://example.com:443/login"
+    )
+
+    assert standard_https.port == 443
+    assert standard_https.is_non_standard_port is False
+
+    standard_http = extract_features(
+        "http://example.com:80/login"
+    )
+
+    assert standard_http.port == 80
+    assert standard_http.is_non_standard_port is False
+
+    unusual = extract_features(
+        "https://example.com:8080/login"
+    )
+
+    assert unusual.port == 8080
+    assert unusual.is_non_standard_port is True
+
+
+def test_module1_path_depth():
+    """Path depth should count meaningful path segments."""
+
+    root = extract_features(
+        "https://example.com/"
+    )
+
+    assert root.path_depth == 0
+
+    nested = extract_features(
+        "https://example.com/a/b/c/d/login"
+    )
+
+    assert nested.path_depth == 5
+
+
+def test_module1_query_parameter_extraction():
+    """Query parameter names should be normalized and deterministic."""
+
+    features = extract_features(
+        "https://example.com/login?User=123&Next=/home"
+    )
+
+    assert features.query_parameter_names == (
+        "next",
+        "user",
+    )
+
+
+def test_module1_redirect_parameter_detection():
+    """Common redirect parameters should generate structural evidence."""
+
+    redirect_urls = [
+        "https://example.com/login?next=https://other.com",
+        "https://example.com/login?redirect=https://other.com",
+        "https://example.com/login?return_url=https://other.com",
+        "https://example.com/login?destination=https://other.com",
+    ]
+
+    for url in redirect_urls:
+        features = extract_features(url)
+
+        assert (
+            features.has_suspicious_redirect_parameter
+            is True
+        )
+
+
+def test_module1_normal_query_does_not_trigger_redirect():
+    """Normal query parameters should not be treated as redirects."""
+
+    features = extract_features(
+        "https://example.com/search?q=hello&page=2"
+    )
+
+    assert (
+        features.has_suspicious_redirect_parameter
+        is False
+    )
+
+
+def test_module1_fragment_detection():
+    """Fragment presence should be represented separately."""
+
+    with_fragment = extract_features(
+        "https://example.com/login#section"
+    )
+
+    assert with_fragment.has_fragment is True
+
+    without_fragment = extract_features(
+        "https://example.com/login"
+    )
+
+    assert without_fragment.has_fragment is False
+
+
+def test_module1_redirect_rule():
+    """Suspicious redirect parameter rule should produce +15 evidence."""
+
+    result = analyze_url_security(
+        "https://example.com/login?next=/other"
+    )
+
+    rule_ids = [
+        reason.rule
+        for reason in result.reasons
+    ]
+
+    assert "SUSPICIOUS_REDIRECT_PARAMETER" in rule_ids
+    assert "EXTERNAL_REDIRECT_DESTINATION" not in rule_ids
+    assert result.risk_score == 15
+    assert result.status == "SAFE"
+
+
+def test_module1_non_standard_port_rule():
+    """Non-standard port should produce low-severity evidence."""
+
+    result = analyze_url_security(
+        "https://example.com:8080/login"
+    )
+
+    rule_ids = [
+        reason.rule
+        for reason in result.reasons
+    ]
+
+    assert "NON_STANDARD_PORT" in rule_ids
+    assert result.risk_score == 5
+    assert result.status == "SAFE"
+
+
+def test_module1_standard_https_port_safe():
+    """Explicit HTTPS port 443 must not trigger NON_STANDARD_PORT."""
+
+    result = analyze_url_security(
+        "https://example.com:443/login"
+    )
+
+    rule_ids = [
+        reason.rule
+        for reason in result.reasons
+    ]
+
+    assert "NON_STANDARD_PORT" not in rule_ids
+
+
+def test_module1_combined_structural_evidence():
+    """Multiple independent structural indicators should aggregate."""
+
+    url = (
+        "http://paypal-security.example.com:8080/login"
+        "?next=https://attacker.example"
+    )
+
+    result = analyze_url_security(url)
+
+    rule_ids = [
+        reason.rule
+        for reason in result.reasons
+    ]
+
+    assert "BRAND_IMPERSONATION" in rule_ids
+    assert "NON_STANDARD_PORT" in rule_ids
+    assert "EXTERNAL_REDIRECT_DESTINATION" in rule_ids
+
+    # 35 + 5 + 15
+    assert result.risk_score == 55
+    assert result.status == "SUSPICIOUS"
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Module 1B — Advanced Structural Detection & Edge Cases
+# ═══════════════════════════════════════════════════════════════════
+
+from backend.detection.features.brands import check_deceptive_domain
+
+
+def test_deceptive_domain_detects_brand_domain_prefix():
+    """Detect legitimate brand-domain sequence before unrelated domain."""
+
+    match = check_deceptive_domain(
+        "paypal.com.attacker.com",
+        "attacker.com",
+    )
+
+    assert match is not None
+    assert match.brand_name == "paypal"
+    assert match.matched_domain == "paypal.com"
+    assert match.registered_domain == "attacker.com"
+
+
+def test_deceptive_domain_does_not_flag_legitimate_brand_subdomain():
+    """Legitimate brand subdomains must not trigger."""
+
+    match = check_deceptive_domain(
+        "login.paypal.com",
+        "paypal.com",
+    )
+
+    assert match is None
+
+
+def test_deceptive_domain_does_not_flag_bare_brand_domain():
+    """Bare legitimate domain must not trigger."""
+
+    match = check_deceptive_domain(
+        "paypal.com",
+        "paypal.com",
+    )
+
+    assert match is None
+
+
+def test_deceptive_domain_requires_complete_labels():
+    """Partial substring matches must not trigger."""
+
+    match = check_deceptive_domain(
+        "paypal.com.attacker.com",
+        "attacker.com",
+    )
+
+    assert match is not None
+
+    partial = check_deceptive_domain(
+        "notpaypal.com.attacker.com",
+        "attacker.com",
+    )
+
+    assert partial is None
+
+
+def test_deceptive_domain_other_brands():
+    """Validate multiple registered brand-domain patterns."""
+
+    cases = [
+        (
+            "google.com.attacker.com",
+            "attacker.com",
+            "google",
+        ),
+        (
+            "apple.com.attacker.com",
+            "attacker.com",
+            "apple",
+        ),
+        (
+            "microsoft.com.attacker.com",
+            "attacker.com",
+            "microsoft",
+        ),
+    ]
+
+    for hostname, registered_domain, expected_brand in cases:
+        match = check_deceptive_domain(
+            hostname,
+            registered_domain,
+        )
+
+        assert match is not None
+        assert match.brand_name == expected_brand
+
+
+def test_deceptive_domain_rule():
+    """Verify deceptive-domain structure generates evidence."""
+
+    result = analyze_url_security(
+        "https://paypal.com.attacker.com/login"
+    )
+
+    rule_ids = [
+        reason.rule
+        for reason in result.reasons
+    ]
+
+    assert "DECEPTIVE_DOMAIN_STRUCTURE" in rule_ids
+
+
+def test_deceptive_domain_legitimate_domains_remain_safe():
+    """Legitimate brand domains must not trigger deceptive-domain rule."""
+
+    urls = [
+        "https://paypal.com",
+        "https://login.paypal.com",
+        "https://www.paypal.com/login",
+        "https://accounts.google.com",
+        "https://login.microsoft.com",
+        "https://support.apple.com",
+    ]
+
+    for url in urls:
+        result = analyze_url_security(url)
+
+        rule_ids = [
+            reason.rule
+            for reason in result.reasons
+        ]
+
+        assert (
+            "DECEPTIVE_DOMAIN_STRUCTURE"
+            not in rule_ids
+        ), url
+
+
+def test_redirect_relative_destination():
+    features = extract_features(
+        "https://example.com/login?next=/dashboard"
+    )
+
+    assert features.has_suspicious_redirect_parameter is True
+    assert features.has_external_redirect_destination is False
+
+
+def test_redirect_same_origin_destination():
+    features = extract_features(
+        "https://example.com/login"
+        "?next=https://example.com/dashboard"
+    )
+
+    assert features.has_external_redirect_destination is False
+
+
+def test_redirect_external_destination():
+    features = extract_features(
+        "https://example.com/login"
+        "?next=https://attacker.com/login"
+    )
+
+    assert features.has_external_redirect_destination is True
+    assert features.redirect_destinations == (
+        "https://attacker.com/login",
+    )
+
+
+def test_redirect_encoded_external_destination():
+    features = extract_features(
+        "https://example.com/login"
+        "?next=https%3A%2F%2Fattacker.com%2Flogin"
+    )
+
+    assert features.has_external_redirect_destination is True
+
+
+def test_redirect_protocol_relative_external_destination():
+    features = extract_features(
+        "https://example.com/login"
+        "?next=//attacker.com/login"
+    )
+
+    assert features.has_external_redirect_destination is True
+
+
+def test_redirect_protocol_relative_same_origin():
+    features = extract_features(
+        "https://example.com/login"
+        "?next=//example.com/dashboard"
+    )
+
+    assert features.has_external_redirect_destination is False
+
+
+def test_non_redirect_parameter_containing_external_url():
+    features = extract_features(
+        "https://example.com/login"
+        "?reference=https://attacker.com"
+    )
+
+    assert features.has_external_redirect_destination is False
+
+
+def test_external_redirect_rule():
+    result = analyze_url_security(
+        "https://example.com/login"
+        "?next=https://attacker.com"
+    )
+
+    rule_ids = [
+        reason.rule
+        for reason in result.reasons
+    ]
+
+    assert "EXTERNAL_REDIRECT_DESTINATION" in rule_ids
+    assert "SUSPICIOUS_REDIRECT_PARAMETER" not in rule_ids
+
+    assert result.risk_score == 15
+    assert result.status == "SAFE"
+
+
+def test_brand_impersonation_with_external_redirect():
+    result = analyze_url_security(
+        "https://paypal-login.example.com/login"
+        "?next=https://attacker.example"
+    )
+
+    rule_ids = [
+        reason.rule
+        for reason in result.reasons
+    ]
+
+    assert "BRAND_IMPERSONATION" in rule_ids
+    assert "EXTERNAL_REDIRECT_DESTINATION" in rule_ids
+
+    # 35 + 15
+    assert result.risk_score == 50
+    assert result.status == "SUSPICIOUS"
+
+
+def test_userinfo_and_hostname_structure_features():
+    features = extract_features(
+        "https://username:password@attacker123.example.com/login"
+    )
+
+    assert features.has_userinfo is True
+    assert features.userinfo_length == len("username:password")
+
+    assert features.hostname_label_count == 3
+    assert features.longest_hostname_label_length == len("attacker123")
+    assert features.numeric_hostname_label_count == 0
+    assert features.mixed_alphanumeric_label_count == 1
+
+
+def test_hostname_structure_normal_domain():
+    features = extract_features(
+        "https://login.example.com"
+    )
+
+    assert features.hostname_label_count == 3
+    assert features.numeric_hostname_label_count == 0
+    assert features.mixed_alphanumeric_label_count == 0
+
+
+def test_numeric_hostname_label():
+    features = extract_features(
+        "https://12345.example.com"
+    )
+
+    assert features.numeric_hostname_label_count == 1
+
+
+def test_excessive_userinfo_rule():
+    long_userinfo = "a" * 40
+
+    result = analyze_url_security(
+        f"https://{long_userinfo}@attacker.com"
+    )
+
+    rule_ids = [
+        reason.rule
+        for reason in result.reasons
+    ]
+
+    assert "USERINFO_AT_SYMBOL" in rule_ids
+    assert "EXCESSIVE_USERINFO" in rule_ids
+
+
+def test_at_symbol_in_path_is_not_userinfo():
+    features = extract_features(
+        "https://example.com/path/@username"
+    )
+
+    assert features.has_userinfo is False
+
+
+def test_at_symbol_in_query_is_not_userinfo():
+    features = extract_features(
+        "https://example.com/login?user=test@example.com"
+    )
+
+    assert features.has_userinfo is False
+
+
+def test_digit_substitution_typosquatting():
+    result = analyze_url_security(
+        "https://www.g00gle.com/search"
+    )
+    rule_ids = [r.rule for r in result.reasons]
+    assert "TYPOSQUATTING" in rule_ids
+
+
+def test_legitimate_google_not_typosquatting():
+    result = analyze_url_security(
+        "https://www.google.com/search"
+    )
+    rule_ids = [r.rule for r in result.reasons]
+    assert "TYPOSQUATTING" not in rule_ids
+
+
+def test_deceptive_userinfo_destination():
+    features = extract_features(
+        "https://www.google.com@malicious-site.com/"
+    )
+    assert features.has_userinfo is True
+    assert features.has_deceptive_userinfo_destination is True
+
+
+def test_non_deceptive_userinfo():
+    features = extract_features(
+        "https://username@example.com/"
+    )
+    assert features.has_userinfo is True
+    assert features.has_deceptive_userinfo_destination is False
+
+
+def test_encoded_path_traversal():
+    features = extract_features(
+        "https://example.com/%2e%2e/%2e%2e/etc/passwd"
+    )
+    assert features.has_encoded_path_traversal is True
+
+
+def test_normal_encoded_path_is_not_traversal():
+    features = extract_features(
+        "https://example.com/%73%65%63%75%72%65"
+    )
+    assert features.has_encoded_path_traversal is False
+
+
+def test_mixed_unicode_scripts():
+    from backend.detection.features.extractor import _has_mixed_unicode_scripts
+    assert _has_mixed_unicode_scripts("example.com") is False

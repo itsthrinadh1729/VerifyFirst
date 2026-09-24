@@ -4,7 +4,6 @@
   "version": "0.2.0",
   "description": "Pre-interaction browser security assistant that analyzes links before you click.",
   "action": {
-    "default_popup": "popup/popup.html",
     "default_icon": {
       "16": "assets/icon16.png",
       "32": "assets/icon32.png",
@@ -13,10 +12,12 @@
     }
   },
   "background": {
-    "service_worker": "background/service-worker.js"
+    "service_worker": "background/service-worker.js",
+    "type": "module"
   },
   "permissions": [
-    "storage"
+    "storage",
+    "activeTab"
   ],
   "host_permissions": [
     "https://web.whatsapp.com/*",
@@ -28,9 +29,16 @@
       "matches": [
         "https://web.whatsapp.com/*"
       ],
+      "css": [
+        "content/security-center/securityCenter.css"
+      ],
       "js": [
         "content/verifyFirstOverlay.js",
-        "content/whatsappScanner.js"
+        "content/protection/types.js",
+        "content/protection/action.js",
+        "content/protection/navigationGuard.js",
+        "content/whatsappScanner.js",
+        "content/security-center/securityCenter.js"
       ],
       "run_at": "document_idle"
     }
@@ -44,7 +52,9 @@
   "web_accessible_resources": [
     {
       "resources": [
-        "assets/*"
+        "assets/*",
+        "content/security-center/securityCenter.css",
+        "shared/telemetryClient.js"
       ],
       "matches": [
         "https://web.whatsapp.com/*"

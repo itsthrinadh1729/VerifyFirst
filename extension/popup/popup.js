@@ -167,10 +167,10 @@
             card.className = "indicator-card";
             const title = document.createElement("div");
             title.className = "indicator-rule-title";
-            title.textContent = "No Indicators Triggered";
+            title.textContent = "No Detection Reasons";
             const desc = document.createElement("div");
             desc.className = "indicator-rule-desc";
-            desc.textContent = "The detection engine identified no suspicious patterns or heuristic rule violations.";
+            desc.textContent = "No specific detection reasons were provided.";
             card.appendChild(title);
             card.appendChild(desc);
             indicatorsContainer.appendChild(card);
@@ -241,8 +241,8 @@
             });
         });
     }
-    function fallbackLoadFromServiceWorker() {
-        chrome.runtime.sendMessage({ type: "GET_TAB_RESULTS" }, (response) => {
+    function fallbackLoadFromServiceWorker(activeTabId) {
+        chrome.runtime.sendMessage({ type: "GET_TAB_RESULTS", tabId: activeTabId }, (response) => {
             if (chrome.runtime.lastError || !response || !response.success || !response.state) {
                 currentRecords = [];
                 renderMainView();

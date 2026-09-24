@@ -41,6 +41,16 @@ class AnalyzeRequest(BaseModel):
         return trimmed
 
 
+class ThreatContextResponse(BaseModel):
+    """Structured explanation of the threat and user impact."""
+
+    title: str = Field(..., description="High-level threat title")
+    summary: str = Field(..., description="Clear explanation of the detection")
+    technical_details: list[str] = Field(default_factory=list, description="Technical rule triggers")
+    user_impact: str = Field(..., description="Explanation of consequences")
+    recommended_action: str = Field(..., description="What the user should do")
+
+
 class DetectionReasonItem(BaseModel):
     """Structured detection reason with rule identifier and human-readable explanation."""
 
@@ -54,4 +64,5 @@ class AnalyzeResponse(BaseModel):
     status: str = Field(..., description="Risk classification: SAFE, SUSPICIOUS, DANGEROUS, or ANALYSIS_UNAVAILABLE")
     risk_score: int = Field(..., ge=0, le=100, description="Risk score from 0 to 100")
     reasons: list[DetectionReasonItem] = Field(default_factory=list, description="List of detection reasons or indicators")
+    threat_context: ThreatContextResponse | None = Field(default=None, description="Detailed explanation of the threat")
 

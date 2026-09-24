@@ -2,6 +2,35 @@
 
 from pydantic import BaseModel
 from typing import Optional
+from enum import Enum
+from dataclasses import dataclass
+
+
+class ThreatIntelAvailability(str, Enum):
+    AVAILABLE = "available"
+    UNAVAILABLE = "unavailable"
+
+
+class ThreatIntelFailure(str, Enum):
+    TIMEOUT = "timeout"
+    CONNECTION_ERROR = "connection_error"
+    HTTP_ERROR = "http_error"
+    INVALID_RESPONSE = "invalid_response"
+    PROVIDER_ERROR = "provider_error"
+
+
+@dataclass(frozen=True)
+class ThreatIntelHealth:
+    available: bool
+    failure: ThreatIntelFailure | None = None
+
+
+@dataclass(frozen=True)
+class FusionEvidence:
+    source: str
+    rule_id: str
+    message: str
+    confidence: str
 
 
 class ThreatIntelResult(BaseModel):

@@ -1,11 +1,15 @@
 """Threat Intelligence Service Layer."""
 
 from backend.detection.intelligence.schemas import ThreatIntelResult
-from backend.detection.intelligence.providers import BaseThreatIntelProvider, GoogleSafeBrowsingProvider
+from backend.detection.intelligence.providers import ThreatIntelProvider, GoogleSafeBrowsingProvider
 
 
 from urllib.parse import urlsplit
 import time
+import logging
+import httpx
+
+logger = logging.getLogger(__name__)
 
 class ThreatIntelService:
     """Orchestrates threat intelligence lookups using configured providers."""
@@ -13,7 +17,7 @@ class ThreatIntelService:
     # 10 minutes cache TTL
     CACHE_TTL_SECONDS = 600
 
-    def __init__(self, provider: BaseThreatIntelProvider = None):
+    def __init__(self, provider: ThreatIntelProvider | None = None):
         # Default to GSB if no provider injected (e.g. for testing)
         self.provider = provider or GoogleSafeBrowsingProvider()
         
@@ -30,12 +34,14 @@ class ThreatIntelService:
         if hasattr(self.provider, "stop"):
             await self.provider.stop()
 
-    def _get_domain_key(self, url: str) -> str:
+    def _get_domain_key(self, url: str) -> str | None:
         try:
             parsed = urlsplit(url)
-            return parsed.hostname or url
+            if not parsed.hostname:
+                return None
+            return parsed.hostname.rstrip(".").lower()
         except Exception:
-            return url
+            return None
 
     async def check_url(self, url: str) -> ThreatIntelResult:
         """
@@ -43,6 +49,9 @@ class ThreatIntelService:
         utilizing a domain-level TTL cache for performance.
         """
         domain_key = self._get_domain_key(url)
+        if not domain_key:
+            return ThreatIntelResult.unavailable()
+
         now = time.time()
         
         # Cache check
@@ -55,7 +64,30 @@ class ThreatIntelService:
                 del self._cache[domain_key]
 
         # Cache miss or expired
-        result = await self.provider.check_url(url)
+        try:
+            result = await self.provider.check_url(domain_key)
+        except httpx.TimeoutException:
+            logger.warning("Threat intelligence provider timeout: provider=%s domain=%s", self.provider.name, domain_key)
+            return ThreatIntelResult.unavailable()
+        except httpx.RequestError:
+            logger.warning("Threat intelligence provider network error: provider=%s domain=%s", self.provider.name, domain_key)
+            return ThreatIntelResult.unavailable()
+        except TimeoutError:
+            logger.warning("Threat intelligence provider timeout: provider=%s domain=%s", self.provider.name, domain_key)
+            return ThreatIntelResult.unavailable()
+        except ConnectionError:
+            logger.warning("Threat intelligence provider network error: provider=%s domain=%s", self.provider.name, domain_key)
+            return ThreatIntelResult.unavailable()
+        except Exception:
+            logger.warning("Threat intelligence provider unexpected error: provider=%s domain=%s", self.provider.name, domain_key)
+            return ThreatIntelResult.unavailable()
+        
+        if not isinstance(result, ThreatIntelResult):
+            logger.warning("Threat intelligence provider returned invalid result: provider=%s domain=%s", self.provider.name, domain_key)
+            return ThreatIntelResult.unavailable()
+
+        if not result.available:
+            return ThreatIntelResult.unavailable()
         
         # Only cache successful lookups (both matches and no-matches), not failures/unavailable
         if result.available:

@@ -58,6 +58,10 @@
         if (host && host.parentNode) {
             host.parentNode.removeChild(host);
         }
+        // Reset transient UI state on close
+        currentViewType = "overview";
+        currentWarningUrl = null;
+        activeWarningPool = [];
     }
     /**
      * Resets the set of displayed warnings (called on chat switch).
@@ -91,9 +95,10 @@
         let idx = activeWarningPool.findIndex(r => r.url === currentWarningUrl);
         if (idx < 0)
             idx = 0;
-        idx = (idx + 1) % activeWarningPool.length;
-        currentWarningUrl = activeWarningPool[idx].url;
-        renderCurrentOverlayView("overview");
+        if (idx < activeWarningPool.length - 1) {
+            currentWarningUrl = activeWarningPool[idx + 1].url;
+            renderCurrentOverlayView("overview");
+        }
     }
     function goPrevWarning() {
         if (activeWarningPool.length <= 1)
@@ -101,9 +106,10 @@
         let idx = activeWarningPool.findIndex(r => r.url === currentWarningUrl);
         if (idx < 0)
             idx = 0;
-        idx = (idx - 1 + activeWarningPool.length) % activeWarningPool.length;
-        currentWarningUrl = activeWarningPool[idx].url;
-        renderCurrentOverlayView("overview");
+        if (idx > 0) {
+            currentWarningUrl = activeWarningPool[idx - 1].url;
+            renderCurrentOverlayView("overview");
+        }
     }
     let currentViewType = "overview";
     function renderCurrentOverlayView(viewType) {
@@ -266,6 +272,7 @@
           transition: color 150ms ease, background 150ms ease;
         }
         .nav-btn:hover { color: #F8FAFC; background: rgba(148, 163, 184, 0.15); }
+        .nav-btn:disabled { color: rgba(134, 150, 160, 0.4); cursor: default; background: transparent; }
 
         .actions {
           display: flex;
@@ -416,10 +423,10 @@
             const statusTitle = document.createElement("div");
             statusTitle.className = "status-title";
             if (record.status === "SUSPICIOUS") {
-                statusTitle.textContent = "⚠ Suspicious link detected";
+                statusTitle.textContent = record.threat_context ? `⚠ ${record.threat_context.title}` : "⚠ Suspicious link detected";
             }
             else if (record.status === "DANGEROUS") {
-                statusTitle.textContent = "⚠ Dangerous link detected";
+                statusTitle.textContent = record.threat_context ? `⚠ ${record.threat_context.title}` : "⚠ Dangerous link detected";
             }
             else {
                 statusTitle.textContent = "⚠ Analysis unavailable";
@@ -443,7 +450,10 @@
             card.appendChild(scoreRow);
             const explanationText = document.createElement("div");
             explanationText.className = "explanation-text";
-            if (record.status === "SUSPICIOUS") {
+            if (record.threat_context) {
+                explanationText.innerHTML = `<strong>Why:</strong> ${record.threat_context.summary}`;
+            }
+            else if (record.status === "SUSPICIOUS") {
                 explanationText.textContent = "Suspicious characteristics were detected in this URL.";
             }
             else if (record.status === "DANGEROUS") {
@@ -453,6 +463,12 @@
                 explanationText.textContent = "VerifyFirst could not complete the security analysis.";
             }
             card.appendChild(explanationText);
+            if (record.threat_context && record.status === "DANGEROUS") {
+                const recommendedText = document.createElement("div");
+                recommendedText.className = "explanation-text";
+                recommendedText.innerHTML = `<strong>Recommended:</strong> ${record.threat_context.recommended_action}`;
+                card.appendChild(recommendedText);
+            }
             const urlBox = document.createElement("div");
             urlBox.className = "url-box";
             urlBox.textContent = record.url;
@@ -462,51 +478,104 @@
             actionCol.className = "action-col";
             const actionRow = document.createElement("div");
             actionRow.className = "action-row";
-            const dismissBtn = document.createElement("button");
-            dismissBtn.type = "button";
-            dismissBtn.className = "btn btn-secondary";
-            dismissBtn.textContent = "Dismiss";
-            dismissBtn.addEventListener("click", handleDismiss);
-            const detailsBtn = document.createElement("button");
-            detailsBtn.type = "button";
-            detailsBtn.className = "btn btn-primary";
-            detailsBtn.textContent = "View Details";
-            detailsBtn.addEventListener("click", () => renderCurrentOverlayView("details"));
             if (activeWarningPool.length > 1) {
                 actionRow.classList.add("has-nav");
-                const navIndex = activeWarningPool.findIndex(r => r.url === currentWarningUrl) + 1;
                 const navControls = document.createElement("div");
                 navControls.className = "nav-controls";
                 const prevBtn = document.createElement("button");
                 prevBtn.type = "button";
                 prevBtn.className = "nav-btn";
-                prevBtn.setAttribute("aria-label", "Previous warning");
                 prevBtn.textContent = "‹";
-                prevBtn.addEventListener("click", () => goPrevWarning());
-                const countSpan = document.createElement("span");
-                countSpan.textContent = `${navIndex} of ${activeWarningPool.length}`;
+                const currentIndex = activeWarningPool.findIndex(r => r.url === currentWarningUrl);
+                if (currentIndex <= 0) {
+                    prevBtn.disabled = true;
+                }
+                else {
+                    prevBtn.addEventListener("click", goPrevWarning);
+                }
+                const label = document.createElement("span");
+                label.textContent = `${Math.max(1, currentIndex + 1)} of ${activeWarningPool.length}`;
                 const nextBtn = document.createElement("button");
                 nextBtn.type = "button";
                 nextBtn.className = "nav-btn";
-                nextBtn.setAttribute("aria-label", "Next warning");
                 nextBtn.textContent = "›";
-                nextBtn.addEventListener("click", () => goNextWarning());
+                if (currentIndex >= activeWarningPool.length - 1) {
+                    nextBtn.disabled = true;
+                }
+                else {
+                    nextBtn.addEventListener("click", goNextWarning);
+                }
                 navControls.appendChild(prevBtn);
-                navControls.appendChild(countSpan);
+                navControls.appendChild(label);
                 navControls.appendChild(nextBtn);
                 actionRow.appendChild(navControls);
-                actionRow.appendChild(dismissBtn);
-                actionCol.appendChild(actionRow);
-                actionCol.appendChild(detailsBtn);
+            }
+            const buttonsGroup = document.createElement("div");
+            buttonsGroup.style.display = "flex";
+            buttonsGroup.style.gap = "6px";
+            if (record.status === "SUSPICIOUS") {
+                const detailsBtn = document.createElement("button");
+                detailsBtn.type = "button";
+                detailsBtn.className = "btn btn-secondary";
+                detailsBtn.textContent = "Details";
+                detailsBtn.addEventListener("click", () => {
+                    const eventId = record.eventId;
+                    if (!eventId) {
+                        console.error("[VerifyFirst] Details clicked but no eventId on record");
+                        return;
+                    }
+                    console.log(`[VerifyFirst] Details clicked, eventId=${eventId}`);
+                    clearVerifyFirstOverlay();
+                    chrome.runtime.sendMessage({
+                        type: "OPEN_SECURITY_EVENT",
+                        eventId: eventId,
+                        source: "overlay"
+                    });
+                });
+                const continueBtn = document.createElement("button");
+                continueBtn.type = "button";
+                continueBtn.className = "btn btn-primary";
+                continueBtn.textContent = "Continue";
+                continueBtn.addEventListener("click", () => {
+                    // Open the suspicious URL directly since the user confirmed "Continue"
+                    window.open(record.url, "_blank", "noopener,noreferrer");
+                    clearVerifyFirstOverlay();
+                });
+                buttonsGroup.appendChild(detailsBtn);
+                buttonsGroup.appendChild(continueBtn);
             }
             else {
-                // Single warning layout
-                detailsBtn.style.paddingLeft = "24px";
-                detailsBtn.style.paddingRight = "24px";
-                actionRow.appendChild(dismissBtn);
-                actionRow.appendChild(detailsBtn);
-                actionCol.appendChild(actionRow);
+                // DANGEROUS or ANALYSIS_UNAVAILABLE
+                if (record.status === "DANGEROUS") {
+                    const detailsBtn = document.createElement("button");
+                    detailsBtn.type = "button";
+                    detailsBtn.className = "btn btn-secondary";
+                    detailsBtn.textContent = "Details";
+                    detailsBtn.addEventListener("click", () => {
+                        const eventId = record.eventId;
+                        if (!eventId) {
+                            console.error("[VerifyFirst] Details clicked but no eventId on record");
+                            return;
+                        }
+                        console.log(`[VerifyFirst] Details clicked, eventId=${eventId}`);
+                        clearVerifyFirstOverlay();
+                        chrome.runtime.sendMessage({
+                            type: "OPEN_SECURITY_EVENT",
+                            eventId: eventId,
+                            source: "overlay"
+                        });
+                    });
+                    buttonsGroup.appendChild(detailsBtn);
+                }
+                const closeBtn = document.createElement("button");
+                closeBtn.type = "button";
+                closeBtn.className = "btn btn-secondary";
+                closeBtn.textContent = "Close";
+                closeBtn.addEventListener("click", handleDismiss);
+                buttonsGroup.appendChild(closeBtn);
             }
+            actionRow.appendChild(buttonsGroup);
+            actionCol.appendChild(actionRow);
             card.appendChild(actionCol);
         }
         else {
@@ -627,12 +696,104 @@
             card.appendChild(actions);
         }
     }
+    function renderUnverifiedView(url) {
+        resetDismissTimer(8000);
+        let host = document.getElementById(OVERLAY_CONTAINER_ID);
+        let shadow;
+        let card;
+        if (!host) {
+            // Reuse host creation logic but simplify for now
+            // Assuming host exists or create it:
+            host = document.createElement("div");
+            host.id = OVERLAY_CONTAINER_ID;
+            host.style.position = "fixed";
+            host.style.top = "16px";
+            host.style.right = "16px";
+            host.style.zIndex = "2147483647";
+            host.style.pointerEvents = "auto";
+            host.style.display = "block";
+            shadow = host.attachShadow({ mode: "open" });
+            // Minimal style for unverified
+            const style = document.createElement("style");
+            style.textContent = `
+            :host { position: fixed !important; top: 16px !important; right: 16px !important; z-index: 2147483647 !important; display: block !important; pointer-events: auto !important; }
+            * { box-sizing: border-box; margin: 0; padding: 0; }
+            .overlay-card { width: 310px; background: #0B141A; color: #F8FAFC; border-radius: 12px; padding: 12px 14px; font-family: sans-serif; box-shadow: 0 12px 32px rgba(0,0,0,0.55); border: 1px solid rgba(148, 163, 184, 0.4); animation: vfFadeSlide 200ms ease-out; }
+            @keyframes vfFadeSlide { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+            .header { display: flex; align-items: center; justify-content: space-between; padding-bottom: 6px; margin-bottom: 9px; border-bottom: 1px solid rgba(148, 163, 184, 0.15); }
+            .close-btn { background: transparent; border: none; color: #8696A0; font-size: 18px; cursor: pointer; }
+            .status-title { font-size: 14px; font-weight: 700; margin-bottom: 8px; color: #94A3B8; }
+            .explanation-text { font-size: 12px; line-height: 1.4; color: #CBD5E1; margin-bottom: 8px; }
+            .url-box { font-family: monospace; font-size: 12px; color: #E2E8F0; background: #0B141A; padding: 8px 10px; border-radius: 5px; border: 1px solid rgba(148, 163, 184, 0.18); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-bottom: 10px; }
+            .actions { display: flex; gap: 6px; justify-content: flex-end; }
+            .btn { font-size: 12px; font-weight: 600; padding: 6px 12px; border-radius: 5px; cursor: pointer; border: none; }
+            .btn-secondary { background: #1E2A33; border: 1px solid rgba(148, 163, 184, 0.20); color: #CBD5E1; }
+        `;
+            shadow.appendChild(style);
+            card = document.createElement("div");
+            shadow.appendChild(card);
+            const targetParent = document.body || document.documentElement;
+            targetParent.appendChild(host);
+        }
+        else {
+            shadow = host.shadowRoot;
+            card = shadow.querySelector('.overlay-card') || document.createElement("div");
+            if (!card.parentNode)
+                shadow.appendChild(card);
+        }
+        card.className = "overlay-card";
+        card.innerHTML = "";
+        const header = document.createElement("div");
+        header.className = "header";
+        const brand = document.createElement("div");
+        brand.textContent = "VERIFYFIRST";
+        brand.style.color = "#FFE082";
+        brand.style.fontWeight = "800";
+        brand.style.fontSize = "13px";
+        const closeBtn = document.createElement("button");
+        closeBtn.className = "close-btn";
+        closeBtn.textContent = "×";
+        closeBtn.addEventListener("click", clearVerifyFirstOverlay);
+        header.appendChild(brand);
+        header.appendChild(closeBtn);
+        card.appendChild(header);
+        const statusTitle = document.createElement("div");
+        statusTitle.className = "status-title";
+        statusTitle.textContent = "⚠ Link not verified yet";
+        card.appendChild(statusTitle);
+        const explanation = document.createElement("div");
+        explanation.className = "explanation-text";
+        explanation.textContent = "VerifyFirst hasn't completed its security analysis for this link.";
+        card.appendChild(explanation);
+        const urlBox = document.createElement("div");
+        urlBox.className = "url-box";
+        urlBox.textContent = url;
+        card.appendChild(urlBox);
+        const actions = document.createElement("div");
+        actions.className = "actions";
+        const dismissBtn = document.createElement("button");
+        dismissBtn.className = "btn btn-secondary";
+        dismissBtn.textContent = "Dismiss";
+        dismissBtn.addEventListener("click", clearVerifyFirstOverlay);
+        actions.appendChild(dismissBtn);
+        card.appendChild(actions);
+    }
+    function showUnverifiedWarning(url) {
+        if (!url)
+            return;
+        renderUnverifiedView(url);
+    }
     /**
      * Displays an automatic security warning overlay inside WhatsApp Web.
      */
     function showVerifyFirstWarning(record, allRecords = [], force = false) {
         if (!record)
             return;
+        try {
+            const u = new URL(record.url);
+            console.log(`[VerifyFirst][Overlay] showVerifyFirstWarning called for hostname=${u.hostname}, status=${record.status}`);
+        }
+        catch { }
         let pool = allRecords
             .filter(r => r.status === "SUSPICIOUS" || r.status === "DANGEROUS" || r.status === "ANALYSIS_UNAVAILABLE")
             .filter(r => !dismissedWarnings.has((r.url || "").trim().toLowerCase()));
@@ -681,6 +842,7 @@
     if (typeof window !== "undefined") {
         window.VerifyFirstOverlay = {
             showVerifyFirstWarning,
+            showUnverifiedWarning,
             clearVerifyFirstOverlay,
             resetDisplayedWarnings,
         };

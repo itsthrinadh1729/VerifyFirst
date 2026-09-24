@@ -6,6 +6,7 @@ from backend.detection.features.extractor import URLFeatures
 from backend.detection.features.brands import (
     check_brand_impersonation,
     check_typosquatting,
+    check_deceptive_domain,
 )
 
 
@@ -54,6 +55,24 @@ RULES: list[RuleDefinition] = [
         evaluator=lambda f: f.has_at_symbol,
     ),
     RuleDefinition(
+        rule_id="EXCESSIVE_USERINFO",
+        weight=10,
+        message=(
+            "The URL contains unusually long user information before "
+            "the destination hostname."
+        ),
+        evaluator=lambda f: f.has_userinfo and f.userinfo_length > 32,
+    ),
+    RuleDefinition(
+        rule_id="DECEPTIVE_USERINFO_DESTINATION",
+        weight=20,
+        message=(
+            "The URL contains a domain-like value before '@' that differs "
+            "from the actual destination hostname."
+        ),
+        evaluator=lambda f: f.has_deceptive_userinfo_destination,
+    ),
+    RuleDefinition(
         rule_id="EXCESSIVE_SUBDOMAINS",
         weight=20,
         message="The website uses an unusually deep subdomain hierarchy.",
@@ -97,6 +116,63 @@ RULES: list[RuleDefinition] = [
         weight=15,
         message="The URL contains unusual encoding in its structure that may obscure the actual destination.",
         evaluator=lambda f: f.has_suspicious_encoding,
+    ),
+    RuleDefinition(
+        rule_id="ENCODED_PATH_TRAVERSAL",
+        weight=20,
+        message=(
+            "The URL contains encoded path traversal sequences that may "
+            "obscure parent-directory navigation."
+        ),
+        evaluator=lambda f: f.has_encoded_path_traversal,
+    ),
+    RuleDefinition(
+        rule_id="SUSPICIOUS_REDIRECT_PARAMETER",
+        weight=15,
+        message=(
+            "The URL contains a parameter commonly associated with "
+            "redirecting users to another destination."
+        ),
+        evaluator=lambda f: (
+            f.has_suspicious_redirect_parameter
+            and not f.has_external_redirect_destination
+        ),
+    ),
+    RuleDefinition(
+        rule_id="EXTERNAL_REDIRECT_DESTINATION",
+        weight=15,
+        message=(
+            "A redirect parameter points to an external web destination "
+            "rather than the current website."
+        ),
+        evaluator=lambda f: (
+            f.has_external_redirect_destination
+        ),
+    ),
+    RuleDefinition(
+        rule_id="NON_STANDARD_PORT",
+        weight=5,
+        message=(
+            "The URL uses a non-standard port for web traffic, "
+            "which may warrant additional scrutiny."
+        ),
+        evaluator=lambda f: f.is_non_standard_port,
+    ),
+    RuleDefinition(
+        rule_id="DECEPTIVE_DOMAIN_STRUCTURE",
+        weight=25,
+        message=(
+            "The hostname begins with a legitimate brand domain "
+            "pattern, but the actual registered domain belongs "
+            "to a different domain."
+        ),
+        evaluator=lambda f: (
+            check_deceptive_domain(
+                f.host,
+                f.registered_domain,
+            )
+            is not None
+        ),
     ),
 ]
 

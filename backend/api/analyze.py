@@ -3,6 +3,9 @@ from backend.api.schemas import AnalyzeRequest, AnalyzeResponse, DetectionReason
 from backend.detection.engine.scorer import analyze_url_security
 from backend.detection.intelligence.service import ThreatIntelService
 from backend.detection.analysis.fusion import fuse_evidence
+from backend.detection.analysis.analyzer import analyze_threats
+from backend.detection.analysis.severity import assess_threat
+from backend.detection.analysis.context import build_threat_context
 
 router = APIRouter(tags=["Analysis"])
 intel_service = ThreatIntelService()
@@ -34,6 +37,21 @@ async def analyze_url(request: AnalyzeRequest) -> AnalyzeResponse:
     # 3. Evidence Fusion
     final_result = fuse_evidence(heuristic_result, intel_result)
 
+    # 4. Threat Explanation (Module 4D)
+    analysis = analyze_threats(final_result)
+    assessment = assess_threat(analysis)
+    context = build_threat_context(analysis, assessment)
+    
+    threat_context_resp = None
+    if context:
+        threat_context_resp = {
+            "title": context.title,
+            "summary": context.summary,
+            "technical_details": list(context.technical_details),
+            "user_impact": context.user_impact,
+            "recommended_action": context.recommended_action,
+        }
+
     return AnalyzeResponse(
         status=final_result.status,
         risk_score=final_result.risk_score,
@@ -41,5 +59,6 @@ async def analyze_url(request: AnalyzeRequest) -> AnalyzeResponse:
             DetectionReasonItem(rule=r.rule, message=r.message)
             for r in final_result.reasons
         ],
+        threat_context=threat_context_resp,
     )
 

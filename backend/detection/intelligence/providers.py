@@ -1,8 +1,8 @@
 """Threat Intelligence Providers."""
 
-import abc
 import os
 import logging
+from typing import Protocol
 from urllib.parse import urlsplit
 import httpx
 
@@ -11,17 +11,72 @@ from backend.detection.intelligence.schemas import ThreatIntelResult
 logger = logging.getLogger(__name__)
 
 
-class BaseThreatIntelProvider(abc.ABC):
-    """Abstract base class for all threat intelligence providers."""
+def normalize_confidence(value) -> str:
+    if isinstance(value, str):
+        normalized = value.strip().lower()
 
-    @abc.abstractmethod
+        if normalized in {"high", "medium", "low"}:
+            return normalized
+
+        if normalized in {"unknown", "unavailable"}:
+            return "unknown"
+
+    if isinstance(value, (int, float)):
+        if not 0.0 <= value <= 1.0:
+            return "unknown"
+
+        if value >= 0.80:
+            return "high"
+
+        if value >= 0.50:
+            return "medium"
+
+        return "low"
+
+    return "unknown"
+
+
+def normalize_threat_intel_result(
+    *,
+    available: bool,
+    is_malicious: bool,
+    confidence,
+    source: str | None,
+    reason: str | None,
+) -> ThreatIntelResult:
+    normalized_available = bool(available)
+
+    # An unavailable intelligence result must never
+    # be interpreted as a malicious match.
+    if not normalized_available:
+        return ThreatIntelResult.unavailable()
+
+    normalized_confidence = normalize_confidence(confidence)
+
+    return ThreatIntelResult(
+        available=True,
+        is_malicious=bool(is_malicious),
+        confidence=normalized_confidence,
+        source=source,
+        reason=reason,
+    )
+
+
+class ThreatIntelProvider(Protocol):
+    @property
+    def name(self) -> str:
+        ...
+
     async def check_url(self, url: str) -> ThreatIntelResult:
-        """Check a URL against the threat intelligence source."""
-        pass
+        ...
 
 
-class GoogleSafeBrowsingProvider(BaseThreatIntelProvider):
+class GoogleSafeBrowsingProvider:
     """Google Safe Browsing v4 API implementation."""
+
+    @property
+    def name(self) -> str:
+        return "google_safe_browsing"
 
     API_URL = "https://safebrowsing.googleapis.com/v4/threatMatches:find"
     CLIENT_ID = "verifyfirst"
@@ -62,7 +117,13 @@ class GoogleSafeBrowsingProvider(BaseThreatIntelProvider):
         to preserve user privacy.
         """
         if not self.api_key:
-            return ThreatIntelResult.unavailable()
+            return normalize_threat_intel_result(
+                available=False,
+                is_malicious=False,
+                confidence="unknown",
+                source=self.name,
+                reason=None,
+            )
             
         # Ensure client exists (in case lifespan was not called in tests)
         if self._client is None:
@@ -92,35 +153,59 @@ class GoogleSafeBrowsingProvider(BaseThreatIntelProvider):
 
             if response.status_code != 200:
                 logger.error(f"Threat intelligence provider returned status {response.status_code}")
-                return ThreatIntelResult.unavailable()
+                return normalize_threat_intel_result(
+                    available=False,
+                    is_malicious=False,
+                    confidence="unknown",
+                    source=self.name,
+                    reason=None,
+                )
 
             data = response.json()
             matches = data.get("matches", [])
 
             if matches:
                 # If there are any matches, it's considered malicious
-                return ThreatIntelResult(
+                return normalize_threat_intel_result(
                     available=True,
                     is_malicious=True,
                     confidence="high",
-                    source="Google Safe Browsing",
+                    source=self.name,
                     reason="Domain has been flagged by Google Safe Browsing."
                 )
 
-            return ThreatIntelResult(
+            return normalize_threat_intel_result(
                 available=True,
                 is_malicious=False,
                 confidence="high",
-                source="Google Safe Browsing",
-                reason=None
+                source=self.name,
+                reason=None,
             )
 
         except httpx.TimeoutException:
             logger.error("Threat intelligence provider timeout")
-            return ThreatIntelResult.unavailable()
+            return normalize_threat_intel_result(
+                available=False,
+                is_malicious=False,
+                confidence="unknown",
+                source=self.name,
+                reason=None,
+            )
         except httpx.RequestError as exc:
             logger.error("Threat intelligence provider network error")
-            return ThreatIntelResult.unavailable()
+            return normalize_threat_intel_result(
+                available=False,
+                is_malicious=False,
+                confidence="unknown",
+                source=self.name,
+                reason=None,
+            )
         except Exception as exc:
             logger.error("Threat intelligence provider unexpected error")
-            return ThreatIntelResult.unavailable()
+            return normalize_threat_intel_result(
+                available=False,
+                is_malicious=False,
+                confidence="unknown",
+                source=self.name,
+                reason=None,
+            )

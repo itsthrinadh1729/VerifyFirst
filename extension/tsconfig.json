@@ -11,7 +11,8 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "declaration": false,
-    "sourceMap": false
+    "sourceMap": false,
+    "typeRoots": ["../node_modules/@types"]
   },
   "include": ["**/*.ts"],
   "exclude": ["node_modules"]

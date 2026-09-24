@@ -199,10 +199,10 @@ interface TabScanState {
       card.className = "indicator-card";
       const title = document.createElement("div");
       title.className = "indicator-rule-title";
-      title.textContent = "No Indicators Triggered";
+      title.textContent = "No Detection Reasons";
       const desc = document.createElement("div");
       desc.className = "indicator-rule-desc";
-      desc.textContent = "The detection engine identified no suspicious patterns or heuristic rule violations.";
+      desc.textContent = "No specific detection reasons were provided.";
       card.appendChild(title);
       card.appendChild(desc);
       indicatorsContainer.appendChild(card);
@@ -244,14 +244,14 @@ interface TabScanState {
       return;
     }
 
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs: any[]) => {
       const activeTabId = tabs && tabs[0] ? tabs[0].id : undefined;
       if (activeTabId === undefined) {
         fallbackLoadFromServiceWorker();
         return;
       }
 
-      chrome.tabs.sendMessage(activeTabId, { type: "GET_CURRENT_CHAT_STATE" }, (response) => {
+      chrome.tabs.sendMessage(activeTabId, { type: "GET_CURRENT_CHAT_STATE" }, (response: any) => {
         if (chrome.runtime.lastError || !response) {
           // Content script might not be injected or ready; fallback to service worker
           fallbackLoadFromServiceWorker();
@@ -286,8 +286,8 @@ interface TabScanState {
     });
   }
 
-  function fallbackLoadFromServiceWorker(): void {
-    chrome.runtime.sendMessage({ type: "GET_TAB_RESULTS" }, (response) => {
+  function fallbackLoadFromServiceWorker(activeTabId?: number): void {
+    chrome.runtime.sendMessage({ type: "GET_TAB_RESULTS", tabId: activeTabId }, (response: any) => {
       if (chrome.runtime.lastError || !response || !response.success || !response.state) {
         currentRecords = [];
         renderMainView();

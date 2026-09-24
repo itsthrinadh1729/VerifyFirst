@@ -1,22 +1,7 @@
 "use strict";
-/**
- * VerifyFirst — WhatsApp Web Content Script
- *
- * Observes the active WhatsApp Web chat, discovers candidate external URLs
- * before user interaction, deduplicates them, and requests backend analysis
- * via the service worker.
- *
- * STRICT PRIVACY:
- * - NO message text is sent
- * - NO contact information, phone numbers, or profile data is accessed or sent
- * - NO cookies, credentials, or session tokens are accessed
- * - ONLY normalized candidate URLs are transmitted
- */
 (function () {
-    // Discovered URLs in the currently opened conversation
     let currentChatId = "";
     const discoveredUrls = new Set();
-    // Analysis records for the CURRENT chat only — single source of truth for popup
     let currentChatRecords = {};
     console.log("[VerifyFirst] Scanner loaded");
     let scanDebounceTimer = null;
@@ -24,7 +9,6 @@
     let bodyObserver = null;
     let currentObservedContainer = null;
     let extensionContextInvalid = false;
-    // Internal WhatsApp domains to ignore
     const WHATSAPP_INTERNAL_DOMAINS = [
         "whatsapp.com",
         "web.whatsapp.com",
@@ -35,10 +19,6 @@
         "whatsapp.net",
         "dyn.web.whatsapp.com",
     ];
-    /**
-     * Gracefully shuts down the content script when extension context becomes invalid
-     * (e.g. extension was reloaded or updated in chrome://extensions).
-     */
     function shutdownScanner() {
         extensionContextInvalid = true;
         if (scanDebounceTimer !== null) {
@@ -625,7 +605,7 @@
                     });
                     return false;
                 }
-                return false;
+                // Don't return false for unrecognized messages — let other listeners handle them
             });
             console.log("[VerifyFirst] ANALYSIS_RESULT listener registered");
         }
@@ -675,17 +655,11 @@
         // Initial attach
         attachChatObserver(getActiveChatContainer());
     }
-    /**
-     * Attaches the heavy URL-scanning observer ONLY to the active chat container.
-     * This prevents VerifyFirst from constantly scanning the entire DOM when the
-     * user interacts with unrelated sidebars or menus.
-     */
     function attachChatObserver(container) {
         if (observerInstance) {
             observerInstance.disconnect();
             observerInstance = null;
         }
-        // Clear chat-scoped state on container replacement
         currentChatId = "";
         discoveredUrls.clear();
         currentChatRecords = {};

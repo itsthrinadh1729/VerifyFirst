@@ -51,7 +51,7 @@ async def test_gsb_provider_match(mock_post):
     
     assert result.available
     assert result.is_malicious
-    assert result.source == "Google Safe Browsing"
+    assert result.source == "google_safe_browsing"
 
 @pytest.mark.asyncio
 @patch("backend.detection.intelligence.providers.httpx.AsyncClient.post")

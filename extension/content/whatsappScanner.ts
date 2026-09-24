@@ -1,22 +1,7 @@
-/**
- * VerifyFirst — WhatsApp Web Content Script
- * 
- * Observes the active WhatsApp Web chat, discovers candidate external URLs
- * before user interaction, deduplicates them, and requests backend analysis
- * via the service worker.
- * 
- * STRICT PRIVACY:
- * - NO message text is sent
- * - NO contact information, phone numbers, or profile data is accessed or sent
- * - NO cookies, credentials, or session tokens are accessed
- * - ONLY normalized candidate URLs are transmitted
- */
 
 (function () {
-  // Discovered URLs in the currently opened conversation
   let currentChatId: string = "";
   const discoveredUrls: Set<string> = new Set<string>();
-  // Analysis records for the CURRENT chat only — single source of truth for popup
   let currentChatRecords: Record<string, any> = {};
   console.log("[VerifyFirst] Scanner loaded");
   let scanDebounceTimer: number | null = null;
@@ -25,7 +10,7 @@
   let currentObservedContainer: HTMLElement | null = null;
   let extensionContextInvalid: boolean = false;
 
-  // Internal WhatsApp domains to ignore
+
   const WHATSAPP_INTERNAL_DOMAINS: string[] = [
     "whatsapp.com",
     "web.whatsapp.com",
@@ -37,10 +22,6 @@
     "dyn.web.whatsapp.com",
   ];
 
-  /**
-   * Gracefully shuts down the content script when extension context becomes invalid
-   * (e.g. extension was reloaded or updated in chrome://extensions).
-   */
   function shutdownScanner(): void {
     extensionContextInvalid = true;
     if (scanDebounceTimer !== null) {
@@ -87,7 +68,7 @@
     }
 
     try {
-      chrome.runtime.sendMessage(message, (response) => {
+      chrome.runtime.sendMessage(message, (response: any) => {
         if (extensionContextInvalid || !isContextValid()) {
           return;
         }
@@ -320,27 +301,27 @@
   function cleanUrlString(raw: string): string {
     // 1. Remove invisible Unicode formatting characters (defense-in-depth)
     let urlStr = raw.replace(/[\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF\u00A0]/g, "");
-    
+
     // 2. Remove leading/trailing parenthesis
     urlStr = urlStr.replace(/^[)\](]+/, "");
-    
+
     while (/[.,;:!?\)\]\(\[]+$/.test(urlStr)) {
       const lastChar = urlStr.slice(-1);
       if (lastChar === ')') {
         const openCount = (urlStr.match(/\(/g) || []).length;
         const closeCount = (urlStr.match(/\)/g) || []).length;
-        if (openCount >= closeCount) break; 
+        if (openCount >= closeCount) break;
       } else if (lastChar === ']') {
         const openCount = (urlStr.match(/\[/g) || []).length;
         const closeCount = (urlStr.match(/\]/g) || []).length;
-        if (openCount >= closeCount) break; 
+        if (openCount >= closeCount) break;
       }
       urlStr = urlStr.slice(0, -1);
     }
-    
+
     // 3. Remove trailing timestamp patterns like 7:08 or 11:48 AM/PM that might be attached without spaces
     urlStr = urlStr.replace(/\d{1,2}:\d{2}(?:\s*(?:AM|PM|am|pm))?$/, "");
-    
+
     return urlStr;
   }
 
@@ -397,20 +378,20 @@
           const text = node.nodeValue || "";
           const lowerText = text.toLowerCase();
           if (!lowerText.includes("http://") && !lowerText.includes("https://")) {
-              return NodeFilter.FILTER_SKIP;
+            return NodeFilter.FILTER_SKIP;
           }
 
           const parent = node.parentElement;
           if (!parent) return NodeFilter.FILTER_SKIP;
-          
+
           const closestAnchor = parent.closest("a[href]");
           if (closestAnchor && !rejectedAnchors.has(closestAnchor)) {
-              return NodeFilter.FILTER_SKIP;
+            return NodeFilter.FILTER_SKIP;
           }
 
           // Structural exclusions (do NOT filter role="button" as WhatsApp uses it for clickable message bubbles)
           if (parent.closest("header, footer, [role='menuitem'], script, style, noscript, [hidden], [aria-hidden='true']")) {
-              return NodeFilter.FILTER_SKIP;
+            return NodeFilter.FILTER_SKIP;
           }
 
           return NodeFilter.FILTER_ACCEPT;
@@ -419,12 +400,12 @@
     );
 
     let currentNode: Node | null;
-    
+
     while ((currentNode = treeWalker.nextNode())) {
       const text = currentNode.nodeValue || "";
       URL_TEXT_PATTERN.lastIndex = 0;
       let match;
-      
+
       while ((match = URL_TEXT_PATTERN.exec(text)) !== null) {
         // Split concatenated URLs (e.g., URL1)(URL2)
         const spaced = match[0].replace(/([)\](]+)(https?:\/\/)/gi, "$1 $2");
@@ -447,7 +428,7 @@
     messageBubbles.forEach((bubble) => {
       // Avoid scanning headers, footers, sidebars that might accidentally match the generic selector
       if (bubble.closest("header, footer, [role='menuitem'], [aria-hidden='true']")) return;
-      
+
       console.log("[VerifyFirst Source3] message bubble inspected");
 
       let text = (bubble as HTMLElement).innerText;
@@ -458,7 +439,7 @@
         hidden.forEach(el => el.remove());
         text = clone.textContent || "";
       }
-      
+
       if (!text.toLowerCase().includes("http://") && !text.toLowerCase().includes("https://")) return;
 
       URL_TEXT_PATTERN.lastIndex = 0;
@@ -550,7 +531,7 @@
 
     // Discover URLs using multi-pass extraction
     const allUrls = discoverUrlsInContainer(chatContainer);
-    
+
     if (isImmediate) {
       console.log(`[VerifyFirst Lifecycle] immediate scan completed: ${allUrls.length} URLs`);
     }
@@ -600,7 +581,7 @@
 
           // 3. Result has not already been rendered in this chat session
           if (currentChatRecords[response.record.url] && currentChatRecords[response.record.url].status !== "SAFE") {
-             return;
+            return;
           }
 
           // Store record for current chat
@@ -704,7 +685,7 @@
           return false;
         }
 
-        return false;
+        // Don't return false for unrecognized messages — let other listeners handle them
       });
       console.log("[VerifyFirst] ANALYSIS_RESULT listener registered");
     } catch (listenerErr: any) {
@@ -759,18 +740,11 @@
     attachChatObserver(getActiveChatContainer());
   }
 
-  /**
-   * Attaches the heavy URL-scanning observer ONLY to the active chat container.
-   * This prevents VerifyFirst from constantly scanning the entire DOM when the 
-   * user interacts with unrelated sidebars or menus.
-   */
   function attachChatObserver(container: HTMLElement | null): void {
     if (observerInstance) {
       observerInstance.disconnect();
       observerInstance = null;
     }
-    
-    // Clear chat-scoped state on container replacement
     currentChatId = "";
     discoveredUrls.clear();
     currentChatRecords = {};
@@ -781,13 +755,13 @@
       type: "CHAT_SWITCHED",
       chatId: "",
     });
-    
+
     currentObservedContainer = container;
-    
+
     if (container) {
       console.log("[VerifyFirst] Attached observer to new chat container");
       console.log("[VerifyFirst Lifecycle] container detected");
-      
+
       console.log("[VerifyFirst Lifecycle] immediate scan started");
       scanActiveChatForUrls(true);
 

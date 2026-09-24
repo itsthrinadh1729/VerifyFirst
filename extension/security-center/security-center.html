@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VerifyFirst Security Center</title>
+  <meta name="description" content="VerifyFirst Security Center — Monitor and manage your link security analysis.">
+  <link rel="stylesheet" href="security-center.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+
+  <!-- Application Shell -->
+  <div id="app-shell" class="app-shell">
+
+    <!-- Sidebar -->
+    <aside id="sidebar" class="sidebar">
+      <div class="sidebar-brand">
+        <img src="../assets/logo-mark.svg" class="sidebar-logo" alt="VerifyFirst" height="40">
+        <div class="sidebar-brand-text">
+          <div class="sidebar-title">VerifyFirst</div>
+          <div class="sidebar-subtitle">Security Center</div>
+        </div>
+      </div>
+
+      <nav class="sidebar-nav" id="sidebar-nav">
+        <button type="button" class="nav-item active" data-view="overview" id="nav-overview">
+          <span class="nav-icon">◉</span>
+          <span class="nav-label">Overview</span>
+        </button>
+        <button type="button" class="nav-item" data-view="link-analysis" id="nav-link-analysis">
+          <span class="nav-icon">⛓</span>
+          <span class="nav-label">Link Analysis</span>
+        </button>
+        <button type="button" class="nav-item" data-view="history" id="nav-history">
+          <span class="nav-icon">⏱</span>
+          <span class="nav-label">Security History</span>
+        </button>
+        <button type="button" class="nav-item" data-view="settings" id="nav-settings">
+          <span class="nav-icon">⚙</span>
+          <span class="nav-label">Settings</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="sidebar-footer-text">Protection Active</div>
+        <div class="sidebar-footer-dot"></div>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main id="main-content" class="main-content">
+
+      <!-- ===== OVERVIEW VIEW ===== -->
+      <section id="view-overview" class="view active">
+        <div class="view-header">
+          <h1 class="view-title">Overview</h1>
+          <div class="view-subtitle">Security &amp; Link Protection Overview</div>
+        </div>
+
+        <div class="view-content-scroll">
+        <!-- Loading State -->
+        <div id="overview-loading" class="state-message">
+          <div class="state-icon spinner"></div>
+          <div class="state-text">Loading security data...</div>
+        </div>
+
+        <!-- Error State -->
+        <div id="overview-error" class="state-message" style="display:none;">
+          <div class="state-icon">⚠</div>
+          <div class="state-text">Security data unavailable.</div>
+          <div class="state-subtext">VerifyFirst protection remains active.</div>
+          <button type="button" class="btn-retry" id="overview-retry">Try Again</button>
+        </div>
+
+        <!-- Data Content -->
+        <div id="overview-content" style="display:none;">
+
+          <!-- Primary Stat Cards -->
+          <div class="stat-cards-primary" id="overview-stat-cards">
+            <div class="stat-card" id="stat-total">
+              <div class="stat-value" id="stat-total-value">—</div>
+              <div class="stat-label">Total Analyzed</div>
+            </div>
+            <div class="stat-card stat-card-safe" id="stat-safe">
+              <div class="stat-value" id="stat-safe-value">—</div>
+              <div class="stat-label">Safe</div>
+            </div>
+            <div class="stat-card stat-card-suspicious" id="stat-suspicious">
+              <div class="stat-value" id="stat-suspicious-value">—</div>
+              <div class="stat-label">Suspicious</div>
+            </div>
+            <div class="stat-card stat-card-dangerous" id="stat-dangerous">
+              <div class="stat-value" id="stat-dangerous-value">—</div>
+              <div class="stat-label">Dangerous</div>
+            </div>
+          </div>
+
+          <!-- Protection Activity -->
+          <div class="section-block">
+            <div class="section-heading">Protection Activity</div>
+            <div class="stat-cards-secondary">
+              <div class="stat-card-sm">
+                <div class="stat-sm-value" id="stat-allowed-value">—</div>
+                <div class="stat-sm-label">Allowed</div>
+              </div>
+              <div class="stat-card-sm">
+                <div class="stat-sm-value" id="stat-warned-value">—</div>
+                <div class="stat-sm-label">Warned</div>
+              </div>
+              <div class="stat-card-sm">
+                <div class="stat-sm-value" id="stat-blocked-value">—</div>
+                <div class="stat-sm-label">Blocked</div>
+              </div>
+              <div class="stat-card-sm">
+                <div class="stat-sm-value" id="stat-hostnames-value">—</div>
+                <div class="stat-sm-label">Unique Hosts</div>
+              </div>
+              <div class="stat-card-sm">
+                <div class="stat-sm-value" id="stat-avg-risk-value">—</div>
+                <div class="stat-sm-label">Avg Risk Score</div>
+              </div>
+              <div class="stat-card-sm">
+                <div class="stat-sm-value" id="stat-highest-risk-value">—</div>
+                <div class="stat-sm-label">Highest Risk</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Recent Security Activity -->
+          <div class="section-block">
+            <div class="section-heading" style="display: flex; justify-content: space-between; align-items: center;">
+              Recent Activity
+              <button type="button" class="btn-text" id="btn-view-all-activity" style="font-size: 12px; color: var(--vf-brand); cursor: pointer; background: transparent; border: none;">View All &rarr;</button>
+            </div>
+            <div id="overview-recent-empty" class="empty-block" style="display:none;">
+              <div class="empty-block-text">No security activity yet.</div>
+              <div class="empty-block-subtext">Events will appear here as VerifyFirst analyzes links.</div>
+            </div>
+            <div id="overview-recent-list" class="event-list"></div>
+          </div>
+        </div>
+        </div>
+      </section>
+
+      <!-- ===== LINK ANALYSIS VIEW ===== -->
+      <section id="view-link-analysis" class="view">
+        <div class="view-header">
+          <h1 class="view-title">Links</h1>
+          <div class="view-subtitle">Recently analyzed security events</div>
+        </div>
+
+        <div class="view-content-scroll">
+        <div id="link-analysis-loading" class="state-message">
+          <div class="state-icon spinner"></div>
+          <div class="state-text">Loading security data...</div>
+        </div>
+        <div id="link-analysis-error" class="state-message" style="display:none;">
+          <div class="state-icon">⚠</div>
+          <div class="state-text">Security data unavailable.</div>
+          <div class="state-subtext">VerifyFirst protection remains active.</div>
+          <button type="button" class="btn-retry" id="link-analysis-retry">Try Again</button>
+        </div>
+
+        <div id="link-analysis-content" style="display:none;">
+          <div id="link-analysis-empty" class="empty-block" style="display:none;">
+            <div class="empty-block-text">No security events yet.</div>
+            <div class="empty-block-subtext">Analyzed links will appear here after VerifyFirst processes them.</div>
+          </div>
+          <table id="link-analysis-table" class="event-table">
+            <thead>
+              <tr>
+                <th>Hostname / IP</th>
+                <th>Status</th>
+                <th>Risk Score</th>
+                <th>Protection Action</th>
+                <th>Time</th>
+              </tr>
+            </thead>
+            <tbody id="link-analysis-tbody"></tbody>
+          </table>
+        </div>
+        </div>
+      </section>
+
+      <!-- ===== SECURITY HISTORY VIEW ===== -->
+      <section id="view-history" class="view">
+        <div class="view-header">
+          <h1 class="view-title">History</h1>
+          <div class="view-subtitle">Full security event log</div>
+        </div>
+
+        <div class="view-content-scroll">
+        <!-- Filter Controls -->
+        <div id="history-filters" class="filter-bar">
+          <div class="filter-group">
+            <label class="filter-label" for="filter-status">Status</label>
+            <select id="filter-status" class="filter-select">
+              <option value="">All</option>
+              <option value="SAFE">Safe</option>
+              <option value="SUSPICIOUS">Suspicious</option>
+              <option value="DANGEROUS">Dangerous</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label class="filter-label" for="filter-protection">Action</label>
+            <select id="filter-protection" class="filter-select">
+              <option value="">All</option>
+              <option value="ALLOW">Allowed</option>
+              <option value="WARN">Warned</option>
+              <option value="BLOCK">Blocked</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label class="filter-label" for="filter-hostname">Hostname / IP</label>
+            <input type="text" id="filter-hostname" class="filter-input" placeholder="Search hostname or IP...">
+          </div>
+          <div class="filter-group">
+            <label class="filter-label" for="filter-min-risk">Min Risk</label>
+            <input type="number" id="filter-min-risk" class="filter-input filter-input-sm" min="0" max="100" placeholder="0">
+          </div>
+          <div class="filter-group">
+            <label class="filter-label" for="filter-max-risk">Max Risk</label>
+            <input type="number" id="filter-max-risk" class="filter-input filter-input-sm" min="0" max="100" placeholder="100">
+          </div>
+          <div class="filter-group">
+            <label class="filter-label" for="filter-from-date">From</label>
+            <input type="date" id="filter-from-date" class="filter-input">
+          </div>
+          <div class="filter-group">
+            <label class="filter-label" for="filter-to-date">To</label>
+            <input type="date" id="filter-to-date" class="filter-input">
+          </div>
+          <div class="filter-group">
+            <label class="filter-label" for="filter-sort">Sort</label>
+            <select id="filter-sort" class="filter-select">
+              <option value="newest">Newest First</option>
+              <option value="oldest">Oldest First</option>
+            </select>
+          </div>
+          <button type="button" class="btn-filter" id="btn-apply-filters">Apply Filters</button>
+          <button type="button" class="btn-filter-reset" id="btn-reset-filters">Reset</button>
+        </div>
+
+        <div id="history-loading" class="state-message" style="display:none;">
+          <div class="state-icon spinner"></div>
+          <div class="state-text">Loading security data...</div>
+        </div>
+        <div id="history-error" class="state-message" style="display:none;">
+          <div class="state-icon">⚠</div>
+          <div class="state-text">Security data unavailable.</div>
+          <div class="state-subtext">VerifyFirst protection remains active.</div>
+          <button type="button" class="btn-retry" id="history-retry">Try Again</button>
+        </div>
+
+        <div id="history-content">
+          <div id="history-empty" class="empty-block" style="display:none;">
+            <div class="empty-block-text">No security events match your filters.</div>
+            <div class="empty-block-subtext">Try adjusting or clearing your filters to see more activity.</div>
+          </div>
+          <table id="history-table" class="event-table">
+            <thead>
+              <tr>
+                <th>Hostname / IP</th>
+                <th>Status</th>
+                <th>Risk Score</th>
+                <th>Protection Action</th>
+                <th>Time</th>
+              </tr>
+            </thead>
+            <tbody id="history-tbody"></tbody>
+          </table>
+
+          <!-- Pagination -->
+          <div id="history-pagination" class="pagination" style="display:none;">
+            <button type="button" class="btn-page" id="btn-prev-page" disabled>← Previous</button>
+            <span class="page-info" id="page-info">Page 1</span>
+            <button type="button" class="btn-page" id="btn-next-page">Next →</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== EVENT DETAILS VIEW (secondary, not in sidebar) ===== -->
+      <section id="view-event-details" class="view">
+        <div class="view-header">
+          <button type="button" class="btn-back-nav" id="btn-details-back" aria-label="Go back to previous view">← Back</button>
+          <h1 class="view-title">Security Event</h1>
+        </div>
+
+        <div id="event-details-content" class="view-content-scroll">
+          <div class="detail-hostname" id="detail-hostname"></div>
+
+          <div class="detail-status-row">
+            <div class="detail-status-badge" id="detail-status-badge"></div>
+            <div class="detail-risk">
+              <span class="detail-risk-label">Risk Score:</span>
+              <span class="detail-risk-value" id="detail-risk-score"></span>
+            </div>
+          </div>
+
+          <div class="detail-section">
+            <div class="detail-section-title">Protection Action</div>
+            <div class="detail-protection-badge" id="detail-protection"></div>
+          </div>
+
+          <div class="detail-section" id="detail-reasons-section">
+            <div class="detail-section-title">Detection Reasons</div>
+            <div id="detail-reasons-list" class="detail-reasons-list"></div>
+          </div>
+
+          <div class="detail-section" id="detail-threat-section" style="display:none;">
+            <div class="detail-section-title">Threat Assessment</div>
+            <div id="detail-threat-context" class="detail-threat-context"></div>
+          </div>
+
+          <div class="detail-section" id="detail-action-section" style="display:none;">
+            <div class="detail-section-title">Recommended Action</div>
+            <div id="detail-recommended-action" class="detail-recommended-action"></div>
+          </div>
+
+          <div class="detail-meta">
+            <span class="detail-meta-label">Detected At:</span>
+            <span class="detail-meta-value" id="detail-timestamp"></span>
+          </div>
+          <div class="detail-meta">
+            <span class="detail-meta-label">Event ID:</span>
+            <span class="detail-meta-value" id="detail-event-id"></span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== SETTINGS VIEW ===== -->
+      <section id="view-settings" class="view">
+        <div class="view-header">
+          <h1 class="view-title">Settings</h1>
+          <div class="view-subtitle">Manage your security data and preferences</div>
+        </div>
+
+        <div class="view-content-scroll">
+        <div class="settings-group">
+          <div class="settings-card">
+            <div class="settings-card-header">
+              <div class="settings-card-title">Export Security History</div>
+              <div class="settings-card-desc">Download your security event history in your preferred format.</div>
+            </div>
+            <div class="export-dropdown-container" style="position: relative;">
+              <button type="button" class="btn-settings" id="btn-export-toggle" aria-haspopup="true" aria-expanded="false" aria-label="Export security history">Export ▾</button>
+              <div id="export-dropdown-menu" class="dropdown-menu" style="display: none; position: absolute; top: calc(100% + 4px); right: 0; background: var(--vf-surface-hover); border: 1px solid var(--vf-surface-border); border-radius: 6px; padding: 4px; z-index: 10; min-width: 120px; box-shadow: 0 4px 12px rgba(0,0,0,0.5);">
+                <button type="button" class="dropdown-item" data-format="json">JSON</button>
+                <button type="button" class="dropdown-item" data-format="csv">CSV</button>
+                <button type="button" class="dropdown-item" data-format="txt">TXT</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-card settings-card-danger">
+            <div class="settings-card-header">
+              <div class="settings-card-title">Clear Security History</div>
+              <div class="settings-card-desc">Permanently remove all locally stored security events.</div>
+            </div>
+            <button type="button" class="btn-settings btn-settings-danger" id="btn-clear" aria-label="Clear security history">Clear</button>
+          </div>
+        </div>
+
+        <!-- Clear Confirmation Modal -->
+        <div id="clear-confirm-modal" class="modal-overlay" style="display:none;">
+          <div class="modal-dialog">
+            <div class="modal-title">Clear all security history?</div>
+            <div class="modal-text">This removes locally stored VerifyFirst security events.<br>Your protection remains active.</div>
+            <div class="modal-actions">
+              <button type="button" class="btn-modal btn-modal-cancel" id="btn-clear-cancel">Cancel</button>
+              <button type="button" class="btn-modal btn-modal-confirm" id="btn-clear-confirm">Clear History</button>
+            </div>
+          </div>
+        </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <script type="module" src="security-center.js"></script>
+</body>
+</html>

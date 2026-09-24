@@ -17,6 +17,16 @@ MIN_TOKEN_LENGTH_FOR_TYPOSQUAT = 4
 TYPOSQUAT_SIMILARITY_THRESHOLD = 0.75
 
 
+_DIGIT_TO_LETTER = {
+    "0": "o",
+    "1": "l",
+    "3": "e",
+    "4": "a",
+    "5": "s",
+    "7": "t",
+}
+
+
 @dataclass(frozen=True)
 class BrandEntry:
     """A known brand with its legitimate registered domains."""
@@ -32,6 +42,15 @@ class BrandMatch:
     brand_name: str
     matched_token: str
     similarity: float  # 1.0 for exact match, <1.0 for typosquat
+
+
+@dataclass(frozen=True)
+class DeceptiveDomainMatch:
+    """Result of detecting a brand-like deceptive domain structure."""
+
+    brand_name: str
+    matched_domain: str
+    registered_domain: str
 
 
 # Curated high-value phishing targets.
@@ -104,16 +123,26 @@ def check_brand_impersonation(
     return None
 
 
+def _normalize_digit_substitutions(token: str) -> str:
+    """Normalize common digit-for-letter substitutions for comparison only."""
+    return "".join(
+        _DIGIT_TO_LETTER.get(char, char)
+        for char in token.lower()
+    )
+
+
 def check_typosquatting(
     hostname_tokens: list[str],
     registered_domain: str,
 ) -> BrandMatch | None:
-    """Detect hostname tokens that closely resemble a known brand (but are not exact).
+    """Detect hostname tokens that closely resemble a known brand.
 
-    Uses difflib.SequenceMatcher for deterministic string similarity.
-    Only considers tokens of sufficient length to avoid short-word false positives.
-    Returns None if the domain is the brand's legitimate domain.
+    Uses deterministic string similarity and a limited digit-substitution
+    normalization to identify common homograph-style typosquatting patterns.
+
+    The original hostname token is preserved in BrandMatch.matched_token.
     """
+
     if not hostname_tokens or not registered_domain:
         return None
 
@@ -121,20 +150,42 @@ def check_typosquatting(
     best_similarity = 0.0
 
     for brand in BRANDS:
-        # Skip brands whose legitimate domain matches
+        # Legitimate brand domains must never be classified as typosquatting.
         if _is_legitimate_domain(registered_domain, brand):
-            return None
+            continue
 
         for token in hostname_tokens:
             token_lower = token.lower()
-            # Skip tokens that are too short
+
             if len(token_lower) < MIN_TOKEN_LENGTH_FOR_TYPOSQUAT:
                 continue
-            # Skip exact matches (handled by brand impersonation rule)
+
+            # Exact brand matches are handled by BRAND_IMPERSONATION.
             if token_lower == brand.name:
                 continue
 
-            ratio = difflib.SequenceMatcher(None, token_lower, brand.name).ratio()
+            normalized_token = _normalize_digit_substitutions(token_lower)
+
+            # Avoid treating a token as a typo merely because normalization
+            # happens to produce the legitimate brand exactly when the token
+            # contains no digit substitution.
+            normalized_similarity = difflib.SequenceMatcher(
+                None,
+                normalized_token,
+                brand.name,
+            ).ratio()
+
+            direct_similarity = difflib.SequenceMatcher(
+                None,
+                token_lower,
+                brand.name,
+            ).ratio()
+
+            ratio = max(
+                direct_similarity,
+                normalized_similarity,
+            )
+
             if ratio >= TYPOSQUAT_SIMILARITY_THRESHOLD and ratio > best_similarity:
                 best_similarity = ratio
                 best_match = BrandMatch(
@@ -144,3 +195,42 @@ def check_typosquatting(
                 )
 
     return best_match
+
+
+def check_deceptive_domain(
+    hostname: str,
+    registered_domain: str,
+) -> DeceptiveDomainMatch | None:
+    """Detect a legitimate brand domain embedded as a deceptive
+    hostname prefix before an unrelated registered domain.
+    """
+    if not hostname or not registered_domain:
+        return None
+
+    hostname = hostname.lower().rstrip(".")
+    registered_domain = registered_domain.lower().rstrip(".")
+
+    if hostname == registered_domain:
+        return None
+
+    hostname_labels = hostname.split(".")
+
+    for brand in BRANDS:
+        for legitimate_domain in brand.legitimate_domains:
+            legitimate_domain = legitimate_domain.lower().rstrip(".")
+            legitimate_labels = legitimate_domain.split(".")
+
+            if len(hostname_labels) <= len(legitimate_labels):
+                continue
+
+            # Check whether the hostname begins with the legitimate
+            # brand domain as a complete sequence of labels.
+            if hostname_labels[:len(legitimate_labels)] == legitimate_labels:
+                if registered_domain != legitimate_domain:
+                    return DeceptiveDomainMatch(
+                        brand_name=brand.name,
+                        matched_domain=legitimate_domain,
+                        registered_domain=registered_domain,
+                    )
+
+    return None

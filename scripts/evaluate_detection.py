@@ -15,7 +15,7 @@ from backend.detection.analysis.fusion import fuse_evidence
 # Mock the GSB provider to simulate a real API key for testing known threat domains
 class MockGSBProvider:
     async def check_url(self, url: str) -> ThreatIntelResult:
-        known_bad = ["ianfette.org", "testsafebrowsing", "eicar"]
+        known_bad = ["ianfette.org", "testsafebrowsing", "malware.wicar.org"]
         is_bad = any(b in url for b in known_bad)
         if is_bad:
             return ThreatIntelResult(available=True, is_malicious=True, confidence="high", source="GSB", reason="Mocked Match")
