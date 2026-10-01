@@ -57,9 +57,9 @@ interface TabScanState {
   lastUpdated: number;
 }
 
-const BACKEND_API_URL = "http://localhost:8000/api/v1/analyze";
-const BACKEND_FILE_API_URL = "http://localhost:8000/api/v1/analyze-file";
-const BACKEND_MESSAGE_API_URL = "http://localhost:8000/api/v1/analyze-message";
+const BACKEND_API_URL = "https://api.verifyfirst.com/api/v1/analyze";
+const BACKEND_FILE_API_URL = "https://api.verifyfirst.com/api/v1/analyze-file";
+const BACKEND_MESSAGE_API_URL = "https://api.verifyfirst.com/api/v1/analyze-message";
 const REQUEST_TIMEOUT_MS = 5000;
 
 /**
@@ -867,22 +867,7 @@ chrome.runtime.onMessage.addListener((message: any, sender: any, sendResponse: a
 
 console.log("VerifyFirst service worker initialized (Phase 2 Pre-interaction Detection)");
 
-chrome.action.onClicked.addListener(async (tab: any) => {
-  console.log("[VerifyFirst] Extension action clicked");
-  
-  if (tab.id === undefined) return;
-  console.log(`[VerifyFirst] Active tab: ${tab.id} / ${tab.url ? new URL(tab.url).hostname : 'unknown'}`);
-  
-  try {
-    await chrome.tabs.sendMessage(tab.id, { type: "OPEN_SECURITY_CENTER" });
-    console.log("[VerifyFirst] OPEN_SECURITY_CENTER sent to tab", tab.id);
-  } catch (err: any) {
-    console.warn(`[VerifyFirst] Failed to open Security Center on this tab: ${err.message || err}`);
-    // Fallback: Open the Security Center dashboard in a new tab
-    chrome.tabs.create({ url: chrome.runtime.getURL("security-center/security-center.html") });
-  }
-});
-
+// Removed chrome.action.onClicked listener because default_popup is defined in manifest
 /**
  * 4D Privacy Hardening: Tab state cleanup
  * Ensure that full message strings/cache states are cleared from 
