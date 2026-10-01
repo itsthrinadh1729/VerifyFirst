@@ -305,8 +305,11 @@ function renderRecentActivity(events: SecurityEvent[]): void {
 
     const hostname = document.createElement("div");
     hostname.className = "event-item-hostname table-hostname-trunc";
-    hostname.title = event.hostname || "unknown";
-    hostname.textContent = event.hostname;
+    let displayName = event.hostname || "";
+    if (event.assetType === "file") displayName = event.filename || "";
+    else if (event.assetType === "message") displayName = "Message";
+    hostname.title = displayName || "unknown";
+    hostname.textContent = displayName || "unknown";
 
     const badge = document.createElement("div");
     badge.className = `event-item-badge ${getStatusBadgeClass(event.status)}`;
@@ -351,7 +354,9 @@ async function loadLinkAnalysis(): Promise<void> {
   contentEl.style.display = "none";
 
   try {
-    const events = await fetchHistory({ sort: "newest" });
+    const allEvents = await fetchHistory({ sort: "newest" });
+    // Filter strictly for URLs so Link Analysis only shows URLs
+    const events = allEvents.filter(e => e.assetType === "url" || e.assetType === undefined);
 
     loadingEl.style.display = "none";
     contentEl.style.display = "";
@@ -522,8 +527,11 @@ function renderEventTable(tbody: HTMLElement, events: SecurityEvent[]): void {
     const tdHostname = document.createElement("td");
     const hostnameSpan = document.createElement("span");
     hostnameSpan.className = "table-hostname-trunc";
-    hostnameSpan.title = event.hostname || "unknown";
-    hostnameSpan.textContent = event.hostname;
+    let displayName = event.hostname || "";
+    if (event.assetType === "file") displayName = event.filename || "";
+    else if (event.assetType === "message") displayName = "Message";
+    hostnameSpan.title = displayName || "unknown";
+    hostnameSpan.textContent = displayName || "unknown";
     tdHostname.appendChild(hostnameSpan);
 
     const tdStatus = document.createElement("td");
@@ -571,11 +579,24 @@ function renderEventDetails(): void {
 
   const event = selectedEvent;
 
-  // Hostname
+  // Hostname / Filename / Message
   const hostEl = $("detail-hostname");
-  hostEl.textContent = event.hostname;
-  hostEl.title = event.hostname || "unknown";
+  let displayName = event.hostname || "";
+  if (event.assetType === "file") displayName = event.filename || "";
+  else if (event.assetType === "message") displayName = event.messagePreview || "Message";
+  hostEl.textContent = displayName || "unknown";
+  hostEl.title = displayName || "unknown";
   hostEl.classList.add("table-hostname-trunc");
+
+  // Asset Type
+  const assetTypeEl = $("detail-asset-type");
+  if (event.assetType === "message") {
+    assetTypeEl.textContent = "Message";
+  } else if (event.assetType === "file") {
+    assetTypeEl.textContent = "File";
+  } else {
+    assetTypeEl.textContent = "Link (URL)";
+  }
 
   // Status badge
   const statusBadge = $("detail-status-badge");

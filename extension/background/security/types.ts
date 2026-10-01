@@ -17,6 +17,13 @@ export interface SecurityEvent {
 
   hostname: string;
 
+  /** Identifies whether this event is for a URL, a file, or a message. Defaults to "url" for backward compatibility. */
+  assetType?: "url" | "file" | "message";
+  /** Original filename for file events (only set when assetType is "file"). */
+  filename?: string;
+  /** Preview of the message for message events (only set when assetType is "message"). */
+  messagePreview?: string;
+
   status: "SAFE" | "SUSPICIOUS" | "DANGEROUS";
 
   riskScore: number | null;

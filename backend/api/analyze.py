@@ -1,11 +1,16 @@
 from fastapi import APIRouter
-from backend.api.schemas import AnalyzeRequest, AnalyzeResponse, DetectionReasonItem
+from backend.api.schemas import (
+    AnalyzeRequest, AnalyzeResponse, DetectionReasonItem,
+    FileAnalyzeRequest, FileAnalyzeResponse,
+)
 from backend.detection.engine.scorer import analyze_url_security
 from backend.detection.intelligence.service import ThreatIntelService
 from backend.detection.analysis.fusion import fuse_evidence
 from backend.detection.analysis.analyzer import analyze_threats
 from backend.detection.analysis.severity import assess_threat
 from backend.detection.analysis.context import build_threat_context
+from backend.detection.message_detection.schemas import MessageAnalysisInput, MessageDetectionResult
+from backend.detection.message_detection.service import analyze_message
 
 router = APIRouter(tags=["Analysis"])
 intel_service = ThreatIntelService()
@@ -62,3 +67,42 @@ async def analyze_url(request: AnalyzeRequest) -> AnalyzeResponse:
         threat_context=threat_context_resp,
     )
 
+
+@router.post("/analyze-file", response_model=FileAnalyzeResponse)
+async def analyze_file_endpoint(request: FileAnalyzeRequest) -> FileAnalyzeResponse:
+    """
+    Analyze a file by its metadata for potential security risks.
+
+    Uses deterministic filename and extension analysis to detect
+    dangerous files, double extensions, script files, and social
+    engineering patterns. No file content is inspected.
+
+    This endpoint is completely isolated from URL analysis.
+    """
+    from backend.detection.file_detection.service import analyze_file
+
+    result = analyze_file(
+        filename=request.filename,
+        mime_type=request.mime_type,
+        file_size=request.file_size,
+        source=request.source,
+    )
+
+    return FileAnalyzeResponse(
+        status=result.status,
+        risk_score=result.risk_score,
+        reasons=[
+            DetectionReasonItem(rule=r.rule, message=r.message)
+            for r in result.reasons
+        ],
+        filename=result.filename,
+        asset_type=result.asset_type,
+    )
+
+
+@router.post("/analyze-message", response_model=MessageDetectionResult)
+async def analyze_message_endpoint(request: MessageAnalysisInput) -> MessageDetectionResult:
+    """
+    Analyze a WhatsApp message for social engineering, phishing, and scam patterns.
+    """
+    return analyze_message(request)

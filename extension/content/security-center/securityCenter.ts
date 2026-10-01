@@ -13,6 +13,9 @@ interface SecurityEvent {
   protectionAction: "ALLOW" | "WARN" | "BLOCK";
   threatCategories?: string[];
   patterns?: string[];
+  assetType?: "url" | "file" | "message";
+  filename?: string;
+  messagePreview?: string;
   reasons?: any[];
   threatContext?: any;
 }
@@ -337,10 +340,30 @@ interface SecurityStatistics {
     return 'Critical';
   }
 
-  function renderHostnameHtml(hostname: string): string {
-    const host = hostname || 'unknown';
-    // Native title attribute for tooltips and standard CSS truncation pattern.
-    return `<span class="vf-sc-host-text" title="${host}">${host}</span>`;
+  function escapeHtml(value: unknown): string {
+    return String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  }
+
+  function getAssetDisplayValue(event: SecurityEvent): string {
+    switch (event.assetType) {
+      case "file":
+        return event.filename || "Unknown file";
+      case "message":
+        return event.messagePreview || "Message";
+      case "url":
+      default:
+        return event.hostname || "Unknown host";
+    }
+  }
+
+  function renderAssetHtml(event: SecurityEvent): string {
+    const displayValue = escapeHtml(getAssetDisplayValue(event));
+    return `<span class="vf-sc-host-text" title="${displayValue}">${displayValue}</span>`;
   }
 
 
@@ -355,7 +378,7 @@ interface SecurityStatistics {
       html += `
         <tr data-id="${safeId}" class="vf-sc-event-row" tabindex="0">
           <td style="font-family: var(--vf-font-mono, monospace); max-width: 150px;">
-            ${renderHostnameHtml(ev.hostname)}
+            ${renderAssetHtml(ev)}
           </td>
           <td>${getBadgeHtml(ev.status)}</td>
           <td>${ev.riskScore ?? '-'}</td>
@@ -502,10 +525,10 @@ interface SecurityStatistics {
 
   function applyHistoryFilters() {
     filteredHistoryEvents = historyEvents.filter(ev => {
-      // 1. Search
       if (historyFilters.search) {
         const query = historyFilters.search.toLowerCase();
-        if (!ev.hostname.toLowerCase().includes(query)) return false;
+        const displayValue = getAssetDisplayValue(ev).toLowerCase();
+        if (!displayValue.includes(query)) return false;
       }
       // 2. Status
       if (historyFilters.status !== "ALL" && ev.status !== historyFilters.status) {
@@ -566,7 +589,7 @@ interface SecurityStatistics {
       </div>
       
       <div class="vf-sc-filters" id="hist-toolbar">
-         <input type="text" id="hist-search" class="vf-sc-input" placeholder="Search hostname or IP..." style="flex:1" value="${historyFilters.search.replace(/"/g, '&quot;')}">
+         <input type="text" id="hist-search" class="vf-sc-input" placeholder="Search events..." style="flex:1" value="${escapeHtml(historyFilters.search)}">
          
          <span class="vf-sc-filter-group">
            Status:
@@ -890,8 +913,8 @@ interface SecurityStatistics {
               <svg viewBox="0 0 24 24" fill="currentColor"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>
             </div>
             <div class="vf-sc-detection-text">
-              <div class="vf-sc-detection-name">${r.rule || 'Indicator'}</div>
-              <div class="vf-sc-detection-desc">${r.message || ''}</div>
+              <div class="vf-sc-detection-name">${escapeHtml(r.rule || 'Indicator')}</div>
+              <div class="vf-sc-detection-desc">${escapeHtml(r.message || '')}</div>
             </div>
           </div>`;
         }).join('')
@@ -926,7 +949,7 @@ interface SecurityStatistics {
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
               <div class="vf-sc-event-detected-at-text">
                 <span class="vf-sc-event-detected-at-label">Detected At</span>
-                <span class="vf-sc-event-detected-at-val">${datePart || 'Unknown Date'} ${timePart ? '• ' + timePart : ''}</span>
+                <span class="vf-sc-event-detected-at-val">${escapeHtml(datePart || 'Unknown Date')} ${timePart ? '• ' + escapeHtml(timePart) : ''}</span>
               </div>
             </div>
             <button class="vf-sc-btn vf-sc-btn-secondary" id="btn-back-details" style="padding: 4px 10px; font-size: 12px;" aria-label="Go back to previous view">
@@ -943,9 +966,9 @@ interface SecurityStatistics {
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><circle cx="16" cy="16" r="4"></circle><line x1="12" y1="16" x2="16" y2="16"></line><line x1="16" y1="12" x2="16" y2="16"></line></svg>
             </div>
             <div class="vf-sc-host-details-col">
-              <span class="vf-sc-host-details-label">Hostname / IP</span>
-              <span class="vf-sc-host-details-val" style="display: block; max-width: 100%; font-family: var(--vf-font-mono, monospace);">${renderHostnameHtml(ev.hostname)}</span>
-              <button class="vf-sc-copy-btn-new" id="vf-sc-copy-btn-hostname" data-clipboard="${ev.hostname || 'unknown'}">
+              <span class="vf-sc-host-details-label">${ev.assetType === 'file' ? 'Filename' : ev.assetType === 'message' ? 'Message Preview' : 'Hostname / IP'}</span>
+              <span class="vf-sc-host-details-val" style="display: block; max-width: 100%; font-family: var(--vf-font-mono, monospace);">${renderAssetHtml(ev)}</span>
+              <button class="vf-sc-copy-btn-new" id="vf-sc-copy-btn-hostname" data-clipboard="${escapeHtml(getAssetDisplayValue(ev))}">
                 <svg viewBox="0 0 24 24"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>
                 Copy
               </button>
@@ -1012,7 +1035,7 @@ interface SecurityStatistics {
               <div class="vf-sc-info-row">
                 <div class="vf-sc-info-row-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg></div>
                 <div class="vf-sc-info-row-label">Asset Type:</div>
-                <div class="vf-sc-info-row-val">Host</div>
+                <div class="vf-sc-info-row-val">${ev.assetType === 'file' ? 'File' : ev.assetType === 'message' ? 'Message' : 'Link'}</div>
               </div>
               <div class="vf-sc-info-row">
                 <div class="vf-sc-info-row-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="14" width="6" height="6" rx="1"></rect><rect x="16" y="14" width="6" height="6" rx="1"></rect><rect x="9" y="4" width="6" height="6" rx="1"></rect><path d="M5 14v-2a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v2"></path><line x1="12" y1="10" x2="12" y2="14"></line></svg></div>
@@ -1027,7 +1050,7 @@ interface SecurityStatistics {
               <div class="vf-sc-info-row">
                 <div class="vf-sc-info-row-icon"></div>
                 <div class="vf-sc-info-row-label">Event ID:</div>
-                <div class="vf-sc-info-row-val">${ev.id || 'Unknown'}</div>
+                <div class="vf-sc-info-row-val">${escapeHtml(ev.id || 'Unknown')}</div>
               </div>
             </div>
           </div>

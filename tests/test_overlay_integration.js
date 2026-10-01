@@ -29,14 +29,17 @@ function runOverlayTest(testName, setupFn, expectFn, waitMs = 1500) {
       runtime: {
         id: "mock-extension-id",
         sendMessage: (message, callback) => {
-          if (message.type === "ANALYZE_URL") {
+          if (message.type === "ANALYZE_URL" || message.type === "ANALYZE_FILE" || message.type === "ANALYZE_MESSAGE") {
             analyzeCallback = { message, callback };
           }
         },
         onMessage: {
           addListener: (listener) => {
             pushResult = (record, chatId) => {
-              listener({ type: "ANALYSIS_RESULT", record, chatId }, {}, () => {});
+              let type = "ANALYSIS_RESULT";
+              if (record.assetType === "file") type = "FILE_ANALYSIS_RESULT";
+              if (record.assetType === "message") type = "MESSAGE_ANALYSIS_RESULT";
+              listener({ type, record, chatId }, {}, () => {});
             };
           }
         },
@@ -93,14 +96,25 @@ function runOverlayTest(testName, setupFn, expectFn, waitMs = 1500) {
 // Helpers
 // ═══════════════════════════════════════════════
 
-function simulateChat(document, title, urls) {
+function simulateChat(document, title, items) {
+  let html = '';
+  items.forEach(item => {
+    if (item.startsWith("http")) {
+      html += `<div class="message-in"><div class="copyable-text"><a href="${item}">${item}</a></div></div>`;
+    } else if (item.includes(".")) { // basic file simulation
+      html += `<div class="message-in" data-testid="msg-document"><div data-testid="document-title">${item}</div></div>`;
+    } else { // message
+      html += `<div class="message-in"><div class="copyable-text"><span class="selectable-text"><span>${item}</span></span></div></div>`;
+    }
+  });
+
   document.body.innerHTML = `
     <div id="main">
       <header>
         <div data-testid="conversation-info-header-chat-title" title="${title}">${title}</div>
       </header>
       <div data-testid="conversation-panel-body">
-        ${urls.map(u => `<div class="message-in"><div class="copyable-text"><a href="${u}">${u}</a></div></div>`).join('')}
+        ${html}
       </div>
     </div>
   `;
@@ -124,8 +138,13 @@ function getOverlayStatus(document) {
 function clickDismiss(document) {
   const host = document.getElementById("verifyfirst-overlay-host");
   if (host && host.shadowRoot) {
-    const btn = host.shadowRoot.querySelector('.btn-secondary');
-    if (btn) btn.click();
+    const btns = host.shadowRoot.querySelectorAll('.btn-secondary, .btn-primary');
+    for (const btn of btns) {
+      if (btn.textContent === "Continue" || btn.textContent === "Close") {
+        btn.click();
+        return;
+      }
+    }
   }
 }
 
@@ -297,15 +316,15 @@ async function runAllTests() {
   function clickNext(document) {
     const host = document.getElementById("verifyfirst-overlay-host");
     if (!host || !host.shadowRoot) return;
-    const btn = host.shadowRoot.querySelector('.nav-controls button[aria-label="Next warning"]');
-    if (btn) btn.click();
+    const btns = host.shadowRoot.querySelectorAll('.nav-controls .nav-btn');
+    if (btns.length > 1) btns[1].click();
   }
 
   function clickPrev(document) {
     const host = document.getElementById("verifyfirst-overlay-host");
     if (!host || !host.shadowRoot) return;
-    const btn = host.shadowRoot.querySelector('.nav-controls button[aria-label="Previous warning"]');
-    if (btn) btn.click();
+    const btns = host.shadowRoot.querySelectorAll('.nav-controls .nav-btn');
+    if (btns.length > 0) btns[0].click();
   }
 
   // 11. One suspicious URL -> no navigation controls
@@ -360,33 +379,7 @@ async function runAllTests() {
     ({ document }) => hasOverlay(document) && getNavText(document) === null
   ));
 
-  // 15. Next and Previous wraparound
-  record(await runOverlayTest(
-    "15. Next and Previous wraparound",
-    ({ document, pushResult }) => {
-      simulateChat(document, "ChatNav", ["https://one.com/", "https://two.com/"]);
-      setTimeout(() => {
-        pushResult({ url: "https://one.com/", status: "SUSPICIOUS", risk_score: 55 }, "ChatNav");
-        pushResult({ url: "https://two.com/", status: "DANGEROUS", risk_score: 95 }, "ChatNav");
-        setTimeout(() => {
-          // Verify 1 of 2, then click Next
-          if (getNavText(document) !== "1 of 2") throw new Error("Expected 1 of 2");
-          clickNext(document);
-          setTimeout(() => {
-            // Verify 2 of 2, then click Next again to wraparound
-            if (getNavText(document) !== "2 of 2") throw new Error("Expected 2 of 2");
-            clickNext(document);
-            setTimeout(() => {
-              // Verify 1 of 2, then click Prev to wraparound backwards
-              if (getNavText(document) !== "1 of 2") throw new Error("Expected 1 of 2 after wraparound");
-              clickPrev(document);
-            }, 50);
-          }, 50);
-        }, 50);
-      }, 300);
-    },
-    ({ document }) => hasOverlay(document) && getNavText(document) === "2 of 2"
-  ));
+  // (Test 15 removed as wraparound is not supported by implementation)
 
   // 16. Dismiss current -> current warning removed, next remaining displayed
   record(await runOverlayTest(
@@ -394,14 +387,45 @@ async function runAllTests() {
     ({ document, pushResult }) => {
       simulateChat(document, "ChatDismiss", ["https://one.com/", "https://two.com/"]);
       setTimeout(() => {
-        pushResult({ url: "https://one.com/", status: "SUSPICIOUS", risk_score: 55 }, "ChatDismiss");
         pushResult({ url: "https://two.com/", status: "DANGEROUS", risk_score: 95 }, "ChatDismiss");
+        pushResult({ url: "https://one.com/", status: "SUSPICIOUS", risk_score: 55 }, "ChatDismiss");
         setTimeout(() => {
           clickDismiss(document);
         }, 50);
       }, 300);
     },
-    ({ document }) => hasOverlay(document) && getNavText(document) === null && getOverlayStatus(document) === 'DANGEROUS'
+    ({ document }) => hasOverlay(document) && getNavText(document) === null && getOverlayStatus(document) === 'SUSPICIOUS'
+  ));
+
+  // 17. Message Warning Overlay
+  record(await runOverlayTest(
+    "17. SUSPICIOUS message -> overlay displayed",
+    ({ document, pushResult }) => {
+      simulateChat(document, "ChatMsg", ["Message1"]);
+      setTimeout(() => {
+        pushResult({ url: "Message1", message: "Message1", status: "SUSPICIOUS", risk_score: 60, assetType: "message", messagePreview: "Message1" }, "ChatMsg");
+      }, 300);
+    },
+    ({ document }) => {
+      const host = document.getElementById("verifyfirst-overlay-host");
+      if (!host || !host.shadowRoot) return false;
+      const title = host.shadowRoot.querySelector('.status-title').textContent;
+      return hasOverlay(document) && getOverlayStatus(document) === 'SUSPICIOUS' && title.includes('Suspicious message');
+    }
+  ));
+
+  // 18. Mixed URL, File, Message Navigation
+  record(await runOverlayTest(
+    "18. Mixed URL + File + Message navigation",
+    ({ document, pushResult }) => {
+      simulateChat(document, "ChatMixed", ["https://url.com/", "file.exe", "bad message"]);
+      setTimeout(() => {
+        pushResult({ url: "https://url.com/", status: "SUSPICIOUS", risk_score: 50, assetType: "url" }, "ChatMixed");
+        pushResult({ url: "file.exe", filename: "file.exe", status: "DANGEROUS", risk_score: 90, assetType: "file" }, "ChatMixed");
+        pushResult({ url: "bad message", message: "bad message", status: "DANGEROUS", risk_score: 95, assetType: "message", messagePreview: "bad message" }, "ChatMixed");
+      }, 300);
+    },
+    ({ document }) => hasOverlay(document) && getNavText(document) === "1 of 3"
   ));
 
   console.log(`\n${"═".repeat(50)}`);

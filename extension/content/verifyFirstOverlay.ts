@@ -32,6 +32,9 @@ interface OverlayAnalysisRecord {
   } | null;
   timestamp: number;
   eventId?: string;
+  assetType?: "url" | "file" | "message";
+  filename?: string;
+  messagePreview?: string;
 }
 
 (function () {
@@ -60,15 +63,21 @@ interface OverlayAnalysisRecord {
     }
   }
 
-  /**
-   * Formats raw rule names into user-friendly title casing.
-   */
   function formatRuleTitle(rule: string): string {
     return rule
       .toLowerCase()
       .split("_")
       .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
       .join(" ");
+  }
+
+  function escapeHtml(value: unknown): string {
+    return String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
   }
 
   /**
@@ -417,6 +426,10 @@ interface OverlayAnalysisRecord {
     } else {
       shadow = host.shadowRoot as ShadowRoot;
       card = shadow.querySelector('.overlay-card') as HTMLDivElement;
+      if (!card) {
+          card = document.createElement("div");
+          shadow.appendChild(card);
+      }
     }
 
     card.className = `overlay-card ${record.status.toLowerCase()}`;
@@ -460,10 +473,14 @@ interface OverlayAnalysisRecord {
 
       const statusTitle = document.createElement("div");
       statusTitle.className = "status-title";
+      let assetLabel = "link";
+      if (record.assetType === "file") assetLabel = "file";
+      else if (record.assetType === "message") assetLabel = "message";
+      
       if (record.status === "SUSPICIOUS") {
-        statusTitle.textContent = record.threat_context ? `⚠ ${record.threat_context.title}` : "⚠ Suspicious link detected";
+        statusTitle.textContent = record.threat_context ? `⚠ ${record.threat_context.title}` : `⚠ Suspicious ${assetLabel} detected`;
       } else if (record.status === "DANGEROUS") {
-        statusTitle.textContent = record.threat_context ? `⚠ ${record.threat_context.title}` : "⚠ Dangerous link detected";
+        statusTitle.textContent = record.threat_context ? `⚠ ${record.threat_context.title}` : `⚠ Dangerous ${assetLabel} detected`;
       } else {
         statusTitle.textContent = "⚠ Analysis unavailable";
       }
@@ -490,11 +507,23 @@ interface OverlayAnalysisRecord {
       const explanationText = document.createElement("div");
       explanationText.className = "explanation-text";
       if (record.threat_context) {
-        explanationText.innerHTML = `<strong>Why:</strong> ${record.threat_context.summary}`;
+        explanationText.innerHTML = `<strong>Why:</strong> ${escapeHtml(record.threat_context.summary)}`;
       } else if (record.status === "SUSPICIOUS") {
-        explanationText.textContent = "Suspicious characteristics were detected in this URL.";
+        if (record.assetType === "message") {
+          explanationText.textContent = "This message shows suspicious characteristics.";
+        } else if (record.assetType === "file") {
+          explanationText.textContent = "This file shows suspicious characteristics.";
+        } else {
+          explanationText.textContent = "Suspicious characteristics were detected in this URL.";
+        }
       } else if (record.status === "DANGEROUS") {
-        explanationText.textContent = "This link shows characteristics commonly associated with unsafe URLs.";
+        if (record.assetType === "message") {
+          explanationText.textContent = "This message has characteristics commonly associated with scams or phishing.";
+        } else if (record.assetType === "file") {
+          explanationText.textContent = "This file has characteristics commonly associated with unsafe files.";
+        } else {
+          explanationText.textContent = "This link shows characteristics commonly associated with unsafe URLs.";
+        }
       } else {
         explanationText.textContent = "VerifyFirst could not complete the security analysis.";
       }
@@ -503,13 +532,19 @@ interface OverlayAnalysisRecord {
       if (record.threat_context && record.status === "DANGEROUS") {
         const recommendedText = document.createElement("div");
         recommendedText.className = "explanation-text";
-        recommendedText.innerHTML = `<strong>Recommended:</strong> ${record.threat_context.recommended_action}`;
+        recommendedText.innerHTML = `<strong>Recommended:</strong> ${escapeHtml(record.threat_context.recommended_action)}`;
         card.appendChild(recommendedText);
       }
 
       const urlBox = document.createElement("div");
       urlBox.className = "url-box";
-      urlBox.textContent = record.url;
+      if (record.assetType === "message") {
+        urlBox.textContent = record.messagePreview || record.url.slice(0, 100);
+      } else if (record.assetType === "file") {
+        urlBox.textContent = record.filename || record.url;
+      } else {
+        urlBox.textContent = record.url;
+      }
       card.appendChild(urlBox);
 
       // Navigation & Actions
@@ -587,9 +622,14 @@ interface OverlayAnalysisRecord {
         continueBtn.className = "btn btn-primary";
         continueBtn.textContent = "Continue";
         continueBtn.addEventListener("click", () => {
-          // Open the suspicious URL directly since the user confirmed "Continue"
-          window.open(record.url, "_blank", "noopener,noreferrer");
-          clearVerifyFirstOverlay();
+          if (record.assetType === "url" || !record.assetType) {
+            // Open the suspicious URL directly since the user confirmed "Continue"
+            window.open(record.url, "_blank", "noopener,noreferrer");
+            clearVerifyFirstOverlay();
+          } else {
+            // For files and messages, we just dismiss the overlay and let the user interact with the WhatsApp UI
+            handleDismiss();
+          }
         });
         
         buttonsGroup.appendChild(detailsBtn);
@@ -658,10 +698,14 @@ interface OverlayAnalysisRecord {
 
       const statusTitle = document.createElement("div");
       statusTitle.className = "status-title";
+      let assetLabel = "link";
+      if (record.assetType === "file") assetLabel = "file";
+      else if (record.assetType === "message") assetLabel = "message";
+
       if (record.status === "SUSPICIOUS") {
-        statusTitle.textContent = "⚠ Suspicious link";
+        statusTitle.textContent = `⚠ Suspicious ${assetLabel}`;
       } else if (record.status === "DANGEROUS") {
-        statusTitle.textContent = "⚠ Dangerous link";
+        statusTitle.textContent = `⚠ Dangerous ${assetLabel}`;
       } else {
         statusTitle.textContent = "⚠ Analysis unavailable";
       }
@@ -685,7 +729,13 @@ interface OverlayAnalysisRecord {
 
       const urlBox = document.createElement("div");
       urlBox.className = "url-box";
-      urlBox.textContent = record.url;
+      if (record.assetType === "message") {
+        urlBox.textContent = record.messagePreview || record.url.slice(0, 100);
+      } else if (record.assetType === "file") {
+        urlBox.textContent = record.filename || record.url;
+      } else {
+        urlBox.textContent = record.url;
+      }
       card.appendChild(urlBox);
 
       const sectionLabel = document.createElement("div");

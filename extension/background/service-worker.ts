@@ -9,7 +9,7 @@
  * 5. Handle chat context isolation on conversation switch.
  */
 
-import { createSecurityEvent } from "./security/event.js";
+import { createSecurityEvent, createFileSecurityEvent, createMessageSecurityEvent } from "./security/event.js";
 import { record as recordHistory, clear as clearHistory } from "./security/historyStore.js";
 import { getSecurityStatistics } from "./security/statistics.js";
 import { querySecurityHistory } from "./security/historyQuery.js";
@@ -29,14 +29,37 @@ interface AnalysisRecord {
   eventId?: string;
 }
 
+interface FileAnalysisRecord {
+  filename: string;
+  status: "SAFE" | "SUSPICIOUS" | "DANGEROUS";
+  risk_score: number | null;
+  reasons: DetectionReason[];
+  timestamp: number;
+  eventId?: string;
+  asset_type: string;
+}
+
+interface MessageAnalysisRecord {
+  status: "SAFE" | "SUSPICIOUS" | "DANGEROUS";
+  risk_score: number | null;
+  reasons: DetectionReason[];
+  timestamp: number;
+  eventId?: string;
+  asset_type: string;
+}
+
 interface TabScanState {
   chatId: string;
   generation: number;
   urls: Record<string, AnalysisRecord>;
+  files: Record<string, FileAnalysisRecord>;
+  messages: Record<string, MessageAnalysisRecord>;
   lastUpdated: number;
 }
 
 const BACKEND_API_URL = "http://localhost:8000/api/v1/analyze";
+const BACKEND_FILE_API_URL = "http://localhost:8000/api/v1/analyze-file";
+const BACKEND_MESSAGE_API_URL = "http://localhost:8000/api/v1/analyze-message";
 const REQUEST_TIMEOUT_MS = 5000;
 
 /**
@@ -64,6 +87,8 @@ async function getTabState(tabId: number): Promise<TabScanState> {
     chatId: "",
     generation: 0,
     urls: {},
+    files: {},
+    messages: {},
     lastUpdated: Date.now(),
   };
 }
@@ -88,6 +113,8 @@ async function handleChatSwitched(tabId: number, chatId: string): Promise<void> 
     chatId: chatId,
     generation: newGeneration,
     urls: {},
+    files: {},
+    messages: {},
     lastUpdated: Date.now(),
   };
   await saveTabState(tabId, state);
@@ -264,6 +291,319 @@ async function handleAnalyzeUrl(tabId: number, url: string): Promise<AnalysisRec
   return analysisPromise;
 }
 
+// ── File Analysis Pipeline (Phase 2) ────────────────────────────────────
+
+/**
+ * Sends a filename to the FastAPI file detection backend.
+ * Safely handles timeouts, network failures, and invalid responses.
+ */
+async function requestFileAnalysis(filename: string): Promise<FileAnalysisRecord> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(BACKEND_FILE_API_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ filename }),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      return {
+        filename,
+        status: "SAFE",
+        risk_score: null,
+        reasons: [],
+        timestamp: Date.now(),
+        asset_type: "file",
+      };
+    }
+
+    const data = await response.json();
+
+    if (
+      !data ||
+      typeof data.status !== "string" ||
+      typeof data.risk_score !== "number" ||
+      !Array.isArray(data.reasons)
+    ) {
+      return {
+        filename,
+        status: "SAFE",
+        risk_score: null,
+        reasons: [],
+        timestamp: Date.now(),
+        asset_type: "file",
+      };
+    }
+
+    return {
+      filename,
+      status: data.status as "SAFE" | "SUSPICIOUS" | "DANGEROUS",
+      risk_score: data.risk_score,
+      reasons: data.reasons,
+      timestamp: Date.now(),
+      asset_type: "file",
+    };
+  } catch (error: any) {
+    clearTimeout(timeoutId);
+    return {
+      filename,
+      status: "SAFE",
+      risk_score: null,
+      reasons: [],
+      timestamp: Date.now(),
+      asset_type: "file",
+    };
+  }
+}
+
+// Separate in-flight tracker for file analysis (prevents mixing with URL dedup)
+const inFlightFileAnalyses = new Map<string, Promise<FileAnalysisRecord>>();
+
+/**
+ * Handles incoming file analysis requests from content scripts.
+ * Parallel to handleAnalyzeUrl — does not touch the URL pipeline.
+ */
+async function handleAnalyzeFile(tabId: number, filename: string): Promise<FileAnalysisRecord> {
+  if (!filename || typeof filename !== "string") {
+    return {
+      filename: filename || "",
+      status: "SAFE",
+      risk_score: null,
+      reasons: [],
+      timestamp: Date.now(),
+      asset_type: "file",
+    };
+  }
+
+  const trimmed = filename.trim();
+  if (!trimmed) {
+    return {
+      filename: "",
+      status: "SAFE",
+      risk_score: null,
+      reasons: [],
+      timestamp: Date.now(),
+      asset_type: "file",
+    };
+  }
+
+  const currentState = await getTabState(tabId);
+  const capturedGeneration = currentState.generation || 0;
+
+  // Check if file is already analyzed for this chat session
+  if (currentState.files[trimmed]) {
+    console.log(`[VerifyFirst] File already analyzed (cached): ${trimmed}`);
+    return currentState.files[trimmed];
+  }
+
+  const cacheKey = `${tabId}_${capturedGeneration}_file_${trimmed}`;
+  if (inFlightFileAnalyses.has(cacheKey)) {
+    console.log(`[VerifyFirst] Deduplicating concurrent file request for: ${trimmed}`);
+    return inFlightFileAnalyses.get(cacheKey)!;
+  }
+
+  console.log(`[VerifyFirst] File analysis requested: ${trimmed}`);
+
+  const analysisPromise = (async () => {
+    try {
+      const record = await requestFileAnalysis(trimmed);
+
+      console.log(`[VerifyFirst] File analysis response: status=${record.status}, risk_score=${record.risk_score}`);
+
+      // Create and record SecurityEvent for history
+      try {
+        const secEvent = createFileSecurityEvent(record, trimmed);
+        if (secEvent) {
+          record.eventId = secEvent.id;
+          recordHistory(secEvent).catch(e => console.error("[VerifyFirst] Deferred file history error:", e));
+        }
+      } catch (e) {
+        console.error("[VerifyFirst] Error dispatching file security event", e);
+      }
+
+      // Re-fetch to ensure fresh state — check generation for chat isolation
+      const freshState = await getTabState(tabId);
+      if ((freshState.generation || 0) !== capturedGeneration) {
+        console.log(`[VerifyFirst] DISCARDED stale file result: generation ${capturedGeneration} → ${freshState.generation}`);
+        return record;
+      }
+
+      // Cache the result
+      freshState.files[trimmed] = record;
+      await saveTabState(tabId, freshState);
+
+      return record;
+    } finally {
+      inFlightFileAnalyses.delete(cacheKey);
+    }
+  })();
+
+  inFlightFileAnalyses.set(cacheKey, analysisPromise);
+  return analysisPromise;
+}
+
+// ── Phase 3G: Message Analysis Pipeline ─────────────────────────────────
+
+async function requestMessageAnalysis(message: string): Promise<MessageAnalysisRecord> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(BACKEND_MESSAGE_API_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ message, source: "whatsapp" }),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      return {
+        status: "SAFE",
+        risk_score: null,
+        reasons: [],
+        timestamp: Date.now(),
+        asset_type: "message",
+      };
+    }
+
+    const data = await response.json();
+
+    if (
+      !data ||
+      typeof data.status !== "string" ||
+      typeof data.risk_score !== "number" ||
+      !Array.isArray(data.reasons)
+    ) {
+      return {
+        status: "SAFE",
+        risk_score: null,
+        reasons: [],
+        timestamp: Date.now(),
+        asset_type: "message",
+      };
+    }
+
+    return {
+      status: data.status as "SAFE" | "SUSPICIOUS" | "DANGEROUS",
+      risk_score: data.risk_score,
+      reasons: data.reasons,
+      timestamp: Date.now(),
+      asset_type: "message",
+    };
+  } catch (error: any) {
+    clearTimeout(timeoutId);
+    return {
+      status: "SAFE",
+      risk_score: null,
+      reasons: [],
+      timestamp: Date.now(),
+      asset_type: "message",
+    };
+  }
+}
+
+async function fingerprintMessage(message: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(message);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+const inFlightMessageAnalyses = new Map<string, Promise<MessageAnalysisRecord>>();
+
+async function handleAnalyzeMessage(tabId: number, message: string): Promise<MessageAnalysisRecord & { message: string }> {
+  if (!message || typeof message !== "string") {
+    return {
+      message: message || "",
+      status: "SAFE",
+      risk_score: null,
+      reasons: [],
+      timestamp: Date.now(),
+      asset_type: "message",
+    };
+  }
+
+  const trimmed = message.trim();
+  if (!trimmed) {
+    return {
+      message: "",
+      status: "SAFE",
+      risk_score: null,
+      reasons: [],
+      timestamp: Date.now(),
+      asset_type: "message",
+    };
+  }
+
+  const fingerprint = await fingerprintMessage(trimmed);
+  const currentState = await getTabState(tabId);
+  const capturedGeneration = currentState.generation || 0;
+
+  if (currentState.messages && currentState.messages[fingerprint]) {
+    console.log(`[VerifyFirst] Message already analyzed (cached)`);
+    return { ...currentState.messages[fingerprint], message: trimmed };
+  }
+
+  const cacheKey = `${tabId}_${capturedGeneration}_msg_${fingerprint}`;
+  if (inFlightMessageAnalyses.has(cacheKey)) {
+    console.log(`[VerifyFirst] Deduplicating concurrent message request`);
+    const record = await inFlightMessageAnalyses.get(cacheKey)!;
+    return { ...record, message: trimmed };
+  }
+
+  console.log(`[VerifyFirst] Message analysis requested`);
+
+  const analysisPromise = (async () => {
+    try {
+      const record = await requestMessageAnalysis(trimmed);
+
+      console.log(`[VerifyFirst] Message analysis response: status=${record.status}`);
+
+      try {
+        const secEvent = createMessageSecurityEvent(record, trimmed);
+        if (secEvent) {
+          record.eventId = secEvent.id;
+          recordHistory(secEvent).catch(e => console.error("[VerifyFirst] Deferred message history error:", e));
+        }
+      } catch (e) {
+        console.error("[VerifyFirst] Error dispatching message security event", e);
+      }
+
+      const freshState = await getTabState(tabId);
+      if ((freshState.generation || 0) !== capturedGeneration) {
+        console.log(`[VerifyFirst] DISCARDED stale message result`);
+        return record;
+      }
+
+      if (!freshState.messages) {
+        freshState.messages = {};
+      }
+      freshState.messages[fingerprint] = record;
+      await saveTabState(tabId, freshState);
+
+      return record;
+    } finally {
+      inFlightMessageAnalyses.delete(cacheKey);
+    }
+  })();
+
+  inFlightMessageAnalyses.set(cacheKey, analysisPromise);
+  const finalRecord = await analysisPromise;
+  return { ...finalRecord, message: trimmed };
+}
+
 // Runtime message listener
 chrome.runtime.onMessage.addListener((message: any, sender: any, sendResponse: any) => {
   if (!message || typeof message.type !== "string") {
@@ -328,6 +668,71 @@ chrome.runtime.onMessage.addListener((message: any, sender: any, sendResponse: a
       });
       return true;
     }
+  }
+
+  if (message.type === "ANALYZE_FILE") {
+    if (tabId === -1) {
+      sendResponse({ error: "Unknown tab sender" });
+      return false;
+    }
+    console.log(`[VerifyFirst] ANALYZE_FILE received for: ${message.filename}`);
+
+    if (typeof message.filename !== "string" || !message.filename.trim()) {
+      console.log(`[VerifyFirst] Rejected ANALYZE_FILE with invalid/missing filename payload.`);
+      sendResponse({ success: false, error: "Invalid filename payload" });
+      return true;
+    }
+
+    handleAnalyzeFile(tabId, message.filename).then((record) => {
+      sendResponse({ success: true, record });
+
+      // Push file analysis result to content script for overlay display
+      try {
+        console.log(`[VerifyFirst] Sending FILE_ANALYSIS_RESULT to tab ${tabId}: status=${record.status}`);
+        chrome.tabs.sendMessage(tabId, {
+          type: "FILE_ANALYSIS_RESULT",
+          record: record,
+          chatId: message.chatId,
+        }).catch((pushErr: any) => {
+          console.log(`[VerifyFirst] tabs.sendMessage (file) caught: ${pushErr?.message || pushErr}`);
+        });
+      } catch (pushErr: any) {
+        console.log(`[VerifyFirst] Failed to push FILE_ANALYSIS_RESULT to tab: ${pushErr?.message}`);
+      }
+    });
+    return true;
+  }
+
+  if (message.type === "ANALYZE_MESSAGE") {
+    if (tabId === -1) {
+      sendResponse({ error: "Unknown tab sender" });
+      return false;
+    }
+    console.log(`[VerifyFirst] ANALYZE_MESSAGE received`);
+
+    if (typeof message.message !== "string" || !message.message.trim()) {
+      console.log(`[VerifyFirst] Rejected ANALYZE_MESSAGE with invalid payload.`);
+      sendResponse({ success: false, error: "Invalid message payload" });
+      return true;
+    }
+
+    handleAnalyzeMessage(tabId, message.message).then((record) => {
+      sendResponse({ success: true, record });
+
+      try {
+        console.log(`[VerifyFirst] Sending MESSAGE_ANALYSIS_RESULT to tab ${tabId}: status=${record.status}`);
+        chrome.tabs.sendMessage(tabId, {
+          type: "MESSAGE_ANALYSIS_RESULT",
+          record: record,
+          chatId: message.chatId,
+        }).catch((pushErr: any) => {
+          console.log(`[VerifyFirst] tabs.sendMessage (message) caught: ${pushErr?.message || pushErr}`);
+        });
+      } catch (pushErr: any) {
+        console.log(`[VerifyFirst] Failed to push MESSAGE_ANALYSIS_RESULT to tab: ${pushErr?.message}`);
+      }
+    });
+    return true;
   }
 
   if (message.type === "TRIGGER_SCAN") {
@@ -475,5 +880,37 @@ chrome.action.onClicked.addListener(async (tab: any) => {
     console.warn(`[VerifyFirst] Failed to open Security Center on this tab: ${err.message || err}`);
     // Fallback: Open the Security Center dashboard in a new tab
     chrome.tabs.create({ url: chrome.runtime.getURL("security-center/security-center.html") });
+  }
+});
+
+/**
+ * 4D Privacy Hardening: Tab state cleanup
+ * Ensure that full message strings/cache states are cleared from 
+ * transient local storage mechanisms when the tab closes.
+ */
+chrome.tabs.onRemoved.addListener((tabId: number) => {
+  try {
+    const key = `tab_${tabId}`;
+    const storage = getStorageArea();
+    storage.remove(key);
+    
+    // Clear in-flight states for this tab
+    const prefix = `${tabId}_`;
+    
+    for (const k of inFlightAnalyses.keys()) {
+      if (k.startsWith(prefix)) inFlightAnalyses.delete(k);
+    }
+    
+    for (const k of inFlightFileAnalyses.keys()) {
+      if (k.startsWith(prefix)) inFlightFileAnalyses.delete(k);
+    }
+    
+    for (const k of inFlightMessageAnalyses.keys()) {
+      if (k.startsWith(prefix)) inFlightMessageAnalyses.delete(k);
+    }
+    
+    console.log(`[VerifyFirst] Cleaned up state and inflight analyses for closed tab ${tabId}`);
+  } catch (err) {
+    console.error(`[VerifyFirst] Error cleaning up tab ${tabId}:`, err);
   }
 });

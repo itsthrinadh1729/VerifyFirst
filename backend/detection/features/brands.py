@@ -56,11 +56,30 @@ class DeceptiveDomainMatch:
 # Curated high-value phishing targets.
 # Each brand's legitimate_domains list contains the registered domains
 # (not subdomains) that are genuinely operated by that brand.
+#
+# MAINTENANCE PRINCIPLE: Each legitimate domain must represent an active,
+# user-facing service. Do not add domains solely because a brand owns them.
+# Deprecated/redirect-only domains (e.g. bard.google → gemini.google) should
+# not be added — they set a precedent that does not scale across brands.
 BRANDS: tuple[BrandEntry, ...] = (
     BrandEntry("paypal", ("paypal.com",)),
     BrandEntry("apple", ("apple.com", "icloud.com")),
     BrandEntry("microsoft", ("microsoft.com", "live.com", "outlook.com", "office.com")),
-    BrandEntry("google", ("google.com", "gmail.com", "youtube.com")),
+    BrandEntry("google", (
+        # Core consumer services
+        "google.com",           # Primary domain, search, workspace
+        "gmail.com",            # Email service
+        "youtube.com",          # Video platform
+        # Active Google-operated .google gTLD services
+        "gemini.google",        # Gemini AI product (share.gemini.google triggered FP)
+        "ai.google",            # Google AI / DeepMind hub
+        "store.google",         # Hardware store
+        "domains.google",       # Domain registration service
+        "about.google",         # Corporate information
+        "blog.google",          # Official blog (blog.google/technology, etc.)
+        "safety.google",        # Safety center
+        "grow.google",          # Digital skills / career certificates
+    )),
     BrandEntry("amazon", ("amazon.com", "amazon.co.uk", "amazon.de", "amazon.in")),
     BrandEntry("netflix", ("netflix.com",)),
     BrandEntry("facebook", ("facebook.com", "fb.com")),

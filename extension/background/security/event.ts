@@ -54,3 +54,92 @@ export function createSecurityEvent(
     threatContext
   };
 }
+
+/**
+ * Creates a normalized SecurityEvent from a file analysis response.
+ * Separate from createSecurityEvent() — file events use assetType "file"
+ * and store the filename instead of a hostname.
+ * Returns null if the analysis result is invalid.
+ */
+export function createFileSecurityEvent(
+  analysis: any,
+  filename: string
+): SecurityEvent | null {
+  if (!analysis || !analysis.status) {
+    return null;
+  }
+
+  if (!filename || typeof filename !== "string" || !filename.trim()) {
+    return null;
+  }
+
+  let protectionAction: "ALLOW" | "WARN" | "BLOCK" = "BLOCK";
+  if (analysis.status === "SAFE") protectionAction = "ALLOW";
+  else if (analysis.status === "SUSPICIOUS") protectionAction = "WARN";
+  else if (analysis.status === "DANGEROUS") protectionAction = "BLOCK";
+
+  const reasons: SecurityEventReason[] = (analysis.reasons || []).map((r: any) => ({
+    rule: r.rule || "",
+    message: r.message || ""
+  }));
+
+  return {
+    id: crypto.randomUUID(),
+    timestamp: Date.now(),
+    hostname: "",
+    assetType: "file",
+    filename: filename.trim(),
+    status: analysis.status as "SAFE" | "SUSPICIOUS" | "DANGEROUS",
+    riskScore: analysis.risk_score !== undefined ? analysis.risk_score : (analysis.riskScore !== undefined ? analysis.riskScore : null),
+    protectionAction,
+    threatCategories: [],
+    patterns: [],
+    reasons,
+  };
+}
+
+/**
+ * Creates a normalized SecurityEvent from a message analysis response.
+ * Returns null if the analysis result is invalid.
+ */
+export function createMessageSecurityEvent(
+  analysis: any,
+  message: string
+): SecurityEvent | null {
+  if (!analysis || !analysis.status) {
+    return null;
+  }
+
+  if (!message || typeof message !== "string" || !message.trim()) {
+    return null;
+  }
+
+  let protectionAction: "ALLOW" | "WARN" | "BLOCK" = "BLOCK";
+  if (analysis.status === "SAFE") protectionAction = "ALLOW";
+  else if (analysis.status === "SUSPICIOUS") protectionAction = "WARN";
+  else if (analysis.status === "DANGEROUS") protectionAction = "BLOCK";
+
+  const reasons: SecurityEventReason[] = (analysis.reasons || []).map((r: any) => {
+    if (typeof r === "string") {
+      return { rule: r, message: r };
+    }
+    return {
+      rule: r.rule || "",
+      message: r.message || ""
+    };
+  });
+
+  return {
+    id: crypto.randomUUID(),
+    timestamp: Date.now(),
+    hostname: "",
+    assetType: "message",
+    messagePreview: analysis.messagePreview || message.slice(0, 100),
+    status: analysis.status as "SAFE" | "SUSPICIOUS" | "DANGEROUS",
+    riskScore: analysis.risk_score !== undefined ? analysis.risk_score : (analysis.riskScore !== undefined ? analysis.riskScore : null),
+    protectionAction,
+    threatCategories: [],
+    patterns: [],
+    reasons,
+  };
+}

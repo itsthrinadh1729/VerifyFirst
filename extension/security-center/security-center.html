@@ -263,7 +263,7 @@
           <table id="history-table" class="event-table">
             <thead>
               <tr>
-                <th>Hostname / IP</th>
+                <th>URL / File</th>
                 <th>Status</th>
                 <th>Risk Score</th>
                 <th>Protection Action</th>
@@ -291,6 +291,11 @@
 
         <div id="event-details-content" class="view-content-scroll">
           <div class="detail-hostname" id="detail-hostname"></div>
+
+          <div class="detail-meta">
+            <span class="detail-meta-label">Asset Type:</span>
+            <span class="detail-meta-value" id="detail-asset-type" style="text-transform: capitalize; font-weight: 600;"></span>
+          </div>
 
           <div class="detail-status-row">
             <div class="detail-status-badge" id="detail-status-badge"></div>

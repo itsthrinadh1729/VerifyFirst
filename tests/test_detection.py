@@ -1055,3 +1055,95 @@ def test_normal_encoded_path_is_not_traversal():
 def test_mixed_unicode_scripts():
     from backend.detection.features.extractor import _has_mixed_unicode_scripts
     assert _has_mixed_unicode_scripts("example.com") is False
+
+
+# ── Regression tests: Google legitimate domain allowlist ──
+# Triggered by share.gemini.google false positive.
+# The BRAND_IMPERSONATION rule must NOT fire when the registered domain
+# belongs to Google's legitimate domain list.
+
+
+import pytest
+
+
+@pytest.mark.parametrize("domain", [
+    "google.com",
+    "gmail.com",
+    "youtube.com",
+    "gemini.google",
+    "ai.google",
+    "store.google",
+    "domains.google",
+    "about.google",
+    "blog.google",
+    "safety.google",
+    "grow.google",
+])
+def test_legitimate_google_domains_no_brand_impersonation(domain):
+    """Each legitimate Google domain must not trigger BRAND_IMPERSONATION."""
+    result = analyze_url_security(f"https://{domain}/")
+    rule_ids = [r.rule for r in result.reasons]
+    assert "BRAND_IMPERSONATION" not in rule_ids, (
+        f"{domain} incorrectly flagged as BRAND_IMPERSONATION"
+    )
+
+
+def test_share_gemini_google_is_safe():
+    """Regression: share.gemini.google must be SAFE with score 0.
+
+    This was the original false positive that exposed the incomplete
+    Google legitimate-domain list.
+    """
+    result = analyze_url_security("https://share.gemini.google")
+    assert result.risk_score == 0
+    assert result.status == "SAFE"
+    rule_ids = [r.rule for r in result.reasons]
+    assert "BRAND_IMPERSONATION" not in rule_ids
+
+
+@pytest.mark.parametrize("subdomain", [
+    "www", "share", "docs", "mail", "maps", "drive",
+])
+def test_google_subdomains_not_impersonation(subdomain):
+    """Subdomains of legitimate Google domains must not trigger."""
+    result = analyze_url_security(f"https://{subdomain}.google.com/")
+    rule_ids = [r.rule for r in result.reasons]
+    assert "BRAND_IMPERSONATION" not in rule_ids
+
+
+# ── Regression tests: malicious Google impersonation must still trigger ──
+
+
+@pytest.mark.parametrize("url,expected_rule", [
+    ("https://google-login.evil.com/signin", "BRAND_IMPERSONATION"),
+    ("https://google-security.evil.com/verify", "BRAND_IMPERSONATION"),
+])
+def test_malicious_google_impersonation_detected(url, expected_rule):
+    """Malicious domains containing 'google' must still trigger detection."""
+    result = analyze_url_security(url)
+    rule_ids = [r.rule for r in result.reasons]
+    assert expected_rule in rule_ids, (
+        f"{url} should have triggered {expected_rule}"
+    )
+
+
+def test_deceptive_google_subdomain_on_evil_domain():
+    """google.com.evil.com — deceptive domain structure, not legitimate."""
+    result = analyze_url_security("https://google.com.evil.com/")
+    rule_ids = [r.rule for r in result.reasons]
+    # Must trigger either BRAND_IMPERSONATION or DECEPTIVE_DOMAIN_STRUCTURE
+    assert (
+        "BRAND_IMPERSONATION" in rule_ids
+        or "DECEPTIVE_DOMAIN_STRUCTURE" in rule_ids
+    ), f"google.com.evil.com should be flagged, got: {rule_ids}"
+
+
+def test_gemini_google_evil_com_not_legitimate():
+    """gemini.google.evil.com — registered domain is evil.com, not legitimate."""
+    result = analyze_url_security("https://gemini.google.evil.com/")
+    rule_ids = [r.rule for r in result.reasons]
+    assert (
+        "BRAND_IMPERSONATION" in rule_ids
+        or "DECEPTIVE_DOMAIN_STRUCTURE" in rule_ids
+    ), f"gemini.google.evil.com should be flagged, got: {rule_ids}"
+    assert result.status != "SAFE"

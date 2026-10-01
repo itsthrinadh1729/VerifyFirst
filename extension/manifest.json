@@ -21,13 +21,15 @@
   ],
   "host_permissions": [
     "https://web.whatsapp.com/*",
+    "https://example.com/*",
     "http://localhost:8000/*",
     "http://127.0.0.1:8000/*"
   ],
   "content_scripts": [
     {
       "matches": [
-        "https://web.whatsapp.com/*"
+        "https://web.whatsapp.com/*",
+        "https://example.com/*"
       ],
       "css": [
         "content/security-center/securityCenter.css"
@@ -57,7 +59,8 @@
         "shared/telemetryClient.js"
       ],
       "matches": [
-        "https://web.whatsapp.com/*"
+        "https://web.whatsapp.com/*",
+        "https://example.com/*"
       ]
     }
   ]

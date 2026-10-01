@@ -33,7 +33,7 @@ export function calculateStatistics(events: SecurityEvent[]): SecurityStatistics
     else if (event.protectionAction === "BLOCK") blockedCount++;
 
     // Unique hostnames
-    if (event.hostname) {
+    if (event.hostname && (event.assetType === "url" || event.assetType === undefined)) {
       hostnames.add(event.hostname);
     }
 

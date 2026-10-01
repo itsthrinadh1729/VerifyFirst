@@ -3,6 +3,13 @@
   let currentChatId: string = "";
   const discoveredUrls: Set<string> = new Set<string>();
   let currentChatRecords: Record<string, any> = {};
+  // Phase 2: File discovery state (parallel to URL state)
+  const discoveredFiles: Set<string> = new Set<string>();
+  let currentFileRecords: Record<string, any> = {};
+  
+  // Phase 3G: Message discovery state
+  const discoveredMessages: Set<string> = new Set<string>();
+  let currentMessageRecords: Record<string, any> = {};
   console.log("[VerifyFirst] Scanner loaded");
   let scanDebounceTimer: number | null = null;
   let observerInstance: MutationObserver | null = null;
@@ -467,6 +474,110 @@
     return found;
   }
 
+  // ── Phase 2: File/Attachment Discovery ──────────────────────────────────
+
+  /**
+   * Extracts the filename from a WhatsApp document message element.
+   * Uses a three-level fallback chain for resilience against DOM changes.
+   */
+  function extractFilenameFromDocument(msgDoc: HTMLElement): string | null {
+    // Strategy 1: data-testid="document-title" (most stable)
+    const titleEl = msgDoc.querySelector('[data-testid="document-title"]');
+    if (titleEl && titleEl.textContent && titleEl.textContent.trim()) {
+      return titleEl.textContent.trim();
+    }
+
+    // Strategy 2: span with title attribute (fallback)
+    const titleSpan = msgDoc.querySelector('span[title]');
+    if (titleSpan) {
+      const title = titleSpan.getAttribute("title");
+      if (title && title.trim()) {
+        return title.trim();
+      }
+    }
+
+    // Strategy 3: first span[dir="auto"] (common WhatsApp text pattern)
+    const dirAutoSpan = msgDoc.querySelector('span[dir="auto"]');
+    if (dirAutoSpan && dirAutoSpan.textContent && dirAutoSpan.textContent.trim()) {
+      return dirAutoSpan.textContent.trim();
+    }
+
+    return null;
+  }
+
+  /**
+   * Discovers document/file attachments in the active chat container.
+   * Only scans [data-testid="msg-document"] elements — images, videos,
+   * audio, stickers, and other media types are explicitly excluded.
+   */
+  function discoverFilesInContainer(chatContainer: HTMLElement): string[] {
+    const found: string[] = [];
+    const seen = new Set<string>();
+
+    const messageArea =
+      chatContainer.querySelector('[data-testid="conversation-panel-messages"]') as HTMLElement ||
+      chatContainer.querySelector('[data-testid="conversation-panel-body"]') as HTMLElement ||
+      chatContainer.querySelector('[role="application"]') as HTMLElement ||
+      chatContainer;
+
+    // Only target document attachment messages
+    const documentMessages = messageArea.querySelectorAll('[data-testid="msg-document"]');
+    documentMessages.forEach((msgDoc) => {
+      const filename = extractFilenameFromDocument(msgDoc as HTMLElement);
+      if (filename && !seen.has(filename)) {
+        seen.add(filename);
+        found.push(filename);
+      }
+    });
+
+    return found;
+  }
+
+  // ── Phase 3G: Message Discovery ─────────────────────────────────────────
+
+  const MAX_MESSAGE_LENGTH = 4000;
+
+  function normalizeMessageText(text: string): string {
+    return text.replace(/\s+/g, " ").trim();
+  }
+
+  function discoverMessagesInContainer(chatContainer: HTMLElement): string[] {
+    const found: string[] = [];
+    const seen = new Set<string>();
+
+    const messageArea =
+      chatContainer.querySelector('[data-testid="conversation-panel-messages"]') as HTMLElement ||
+      chatContainer.querySelector('[data-testid="conversation-panel-body"]') as HTMLElement ||
+      chatContainer.querySelector('[role="application"]') as HTMLElement ||
+      chatContainer;
+
+    // Target incoming messages specifically and find the text span
+    const messageBubbles = messageArea.querySelectorAll('.message-in .selectable-text');
+    messageBubbles.forEach((bubble) => {
+      // Avoid scanning headers, footers, sidebars
+      if (bubble.closest("header, footer, [role='menuitem'], [aria-hidden='true']")) return;
+
+      let text = (bubble as HTMLElement).innerText;
+      if (typeof text !== "string") {
+        const clone = bubble.cloneNode(true) as HTMLElement;
+        const hidden = clone.querySelectorAll("[hidden], [aria-hidden='true']");
+        hidden.forEach(el => el.remove());
+        text = clone.textContent || "";
+      }
+
+      const normalized = normalizeMessageText(text);
+      if (!normalized) return;
+
+      const message = normalized.slice(0, MAX_MESSAGE_LENGTH);
+      if (!seen.has(message)) {
+        seen.add(message);
+        found.push(message);
+      }
+    });
+
+    return found;
+  }
+
   /**
    * Schedules a single delayed scan for catching async-rendered messages.
    */
@@ -496,6 +607,10 @@
         currentChatId = "";
         discoveredUrls.clear();
         currentChatRecords = {};
+        discoveredFiles.clear();
+        currentFileRecords = {};
+        discoveredMessages.clear();
+        currentMessageRecords = {};
         if (typeof window !== "undefined" && (window as any).VerifyFirstOverlay) {
           (window as any).VerifyFirstOverlay.resetDisplayedWarnings();
         }
@@ -514,6 +629,10 @@
       currentChatId = activeChatId;
       discoveredUrls.clear();
       currentChatRecords = {};
+      discoveredFiles.clear();
+      currentFileRecords = {};
+      discoveredMessages.clear();
+      currentMessageRecords = {};
       if (typeof window !== "undefined" && (window as any).VerifyFirstOverlay) {
         (window as any).VerifyFirstOverlay.resetDisplayedWarnings();
       }
@@ -600,6 +719,172 @@
         });
       }
     }
+
+    // ── Phase 2: File discovery and dispatch ──
+    const allFiles = discoverFilesInContainer(chatContainer);
+    const newFileCandidates: string[] = [];
+
+    for (const filename of allFiles) {
+      if (!discoveredFiles.has(filename)) {
+        discoveredFiles.add(filename);
+        newFileCandidates.push(filename);
+        console.log(`[VerifyFirst] File candidate discovered: ${filename}`);
+      }
+    }
+
+    if (newFileCandidates.length > 0) {
+      for (const filename of newFileCandidates) {
+        const requestChatId = currentChatId;
+        console.log(`[VerifyFirst] ANALYZE_FILE sent for: ${filename}`);
+        safeSendMessage({
+          type: "ANALYZE_FILE",
+          filename: filename,
+          chatId: requestChatId,
+        }, (response) => {
+          if (!response || !response.success || !response.record) {
+            return;
+          }
+
+          // Chat isolation check
+          if (!requestChatId || currentChatId !== requestChatId) {
+            return;
+          }
+
+          // File dedup check
+          if (!discoveredFiles.has(response.record.filename)) {
+            return;
+          }
+
+          // Already rendered check
+          if (currentFileRecords[response.record.filename] && currentFileRecords[response.record.filename].status !== "SAFE") {
+            return;
+          }
+
+          // Store record
+          currentFileRecords[response.record.filename] = response.record;
+
+          // Trigger warning for non-SAFE results
+          if (response.record.status !== "SAFE") {
+            if (typeof window !== "undefined" && (window as any).VerifyFirstOverlay) {
+              try {
+                // Build a file-aware overlay record
+                const fileOverlayRecord = {
+                  url: response.record.filename,
+                  status: response.record.status,
+                  risk_score: response.record.risk_score,
+                  reasons: response.record.reasons || [],
+                  timestamp: response.record.timestamp,
+                  eventId: response.record.eventId,
+                  assetType: "file" as const,
+                  filename: response.record.filename,
+                };
+                const allRecords = [
+                  ...Object.values(currentChatRecords),
+                  ...Object.values(currentFileRecords).map((r: any) => ({
+                    url: r.filename,
+                    status: r.status,
+                    risk_score: r.risk_score,
+                    reasons: r.reasons || [],
+                    timestamp: r.timestamp,
+                    eventId: r.eventId,
+                    assetType: "file" as const,
+                    filename: r.filename,
+                  })),
+                ];
+                (window as any).VerifyFirstOverlay.showVerifyFirstWarning(fileOverlayRecord, allRecords);
+              } catch (e: any) {
+                console.error(`[VerifyFirst] Error displaying file overlay: ${e?.message || e}`);
+              }
+            }
+          }
+        });
+      }
+    }
+
+    // ── Phase 3G: Message discovery and dispatch ──
+    const allMessages = discoverMessagesInContainer(chatContainer);
+    const newMessageCandidates: string[] = [];
+
+    for (const message of allMessages) {
+      if (!discoveredMessages.has(message)) {
+        discoveredMessages.add(message);
+        newMessageCandidates.push(message);
+        console.log(`[VerifyFirst] Message candidate discovered`);
+      }
+    }
+
+    if (newMessageCandidates.length > 0) {
+      for (const message of newMessageCandidates) {
+        const requestChatId = currentChatId;
+        console.log(`[VerifyFirst] ANALYZE_MESSAGE sent`);
+        safeSendMessage({
+          type: "ANALYZE_MESSAGE",
+          message: message,
+          chatId: requestChatId,
+        }, (response) => {
+          if (!response || !response.success || !response.record) {
+            return;
+          }
+
+          if (!requestChatId || currentChatId !== requestChatId) {
+            return;
+          }
+
+          if (!discoveredMessages.has(response.record.message)) {
+            return;
+          }
+
+          if (currentMessageRecords[response.record.message] && currentMessageRecords[response.record.message].status !== "SAFE") {
+            return;
+          }
+
+          currentMessageRecords[response.record.message] = response.record;
+
+          if (response.record.status !== "SAFE") {
+            if (typeof window !== "undefined" && (window as any).VerifyFirstOverlay) {
+              try {
+                const messageOverlayRecord = {
+                  url: response.record.message,
+                  status: response.record.status,
+                  risk_score: response.record.risk_score,
+                  reasons: response.record.reasons || [],
+                  timestamp: response.record.timestamp,
+                  eventId: response.record.eventId,
+                  assetType: "message" as const,
+                  messagePreview: response.record.messagePreview || response.record.message.slice(0, 100),
+                };
+                const allRecords = [
+                  ...Object.values(currentChatRecords),
+                  ...Object.values(currentFileRecords).map((r: any) => ({
+                    url: r.filename,
+                    status: r.status,
+                    risk_score: r.risk_score,
+                    reasons: r.reasons || [],
+                    timestamp: r.timestamp,
+                    eventId: r.eventId,
+                    assetType: "file" as const,
+                    filename: r.filename,
+                  })),
+                  ...Object.values(currentMessageRecords).map((r: any) => ({
+                    url: r.message,
+                    status: r.status,
+                    risk_score: r.risk_score,
+                    reasons: r.reasons || [],
+                    timestamp: r.timestamp,
+                    eventId: r.eventId,
+                    assetType: "message" as const,
+                    messagePreview: r.messagePreview || r.message.slice(0, 100),
+                  })),
+                ];
+                (window as any).VerifyFirstOverlay.showVerifyFirstWarning(messageOverlayRecord, allRecords);
+              } catch (e: any) {
+                console.error(`[VerifyFirst] Error displaying message overlay: ${e?.message || e}`);
+              }
+            }
+          }
+        });
+      }
+    }
   }
 
   /**
@@ -650,6 +935,134 @@
   }
 
   /**
+   * Handler for file analysis results pushed from the service worker.
+   */
+  function handleFileAnalysisResult(record: any, resultChatId?: string): void {
+    console.log(`[VerifyFirst] handleFileAnalysisResult called for ${record?.filename} (chat: ${resultChatId})`);
+    if (!record || !record.filename || !record.status) {
+      return;
+    }
+
+    if (!resultChatId || resultChatId !== currentChatId) {
+      return;
+    }
+
+    if (!discoveredFiles.has(record.filename)) {
+      return;
+    }
+
+    if (currentFileRecords[record.filename] && currentFileRecords[record.filename].status !== "SAFE") {
+      return;
+    }
+
+    currentFileRecords[record.filename] = record;
+
+    if (record.status === "SAFE") {
+      return;
+    }
+
+    if (typeof window !== "undefined" && (window as any).VerifyFirstOverlay) {
+      try {
+        const fileOverlayRecord = {
+          url: record.filename,
+          status: record.status,
+          risk_score: record.risk_score,
+          reasons: record.reasons || [],
+          timestamp: record.timestamp,
+          eventId: record.eventId,
+          assetType: "file" as const,
+          filename: record.filename,
+        };
+        const allRecords = [
+          ...Object.values(currentChatRecords),
+          ...Object.values(currentFileRecords).map((r: any) => ({
+            url: r.filename,
+            status: r.status,
+            risk_score: r.risk_score,
+            reasons: r.reasons || [],
+            timestamp: r.timestamp,
+            eventId: r.eventId,
+            assetType: "file" as const,
+            filename: r.filename,
+          })),
+        ];
+        (window as any).VerifyFirstOverlay.showVerifyFirstWarning(fileOverlayRecord, allRecords);
+      } catch (e: any) {
+        console.error(`[VerifyFirst] Error displaying file overlay: ${e?.message || e}`);
+      }
+    }
+  }
+
+  /**
+   * Handler for message analysis results pushed from the service worker.
+   */
+  function handleMessageAnalysisResult(record: any, resultChatId?: string): void {
+    console.log(`[VerifyFirst] handleMessageAnalysisResult called (chat: ${resultChatId})`);
+    if (!record || !record.message || !record.status) {
+      return;
+    }
+
+    if (!resultChatId || resultChatId !== currentChatId) {
+      return;
+    }
+
+    if (!discoveredMessages.has(record.message)) {
+      return;
+    }
+
+    if (currentMessageRecords[record.message] && currentMessageRecords[record.message].status !== "SAFE") {
+      return;
+    }
+
+    currentMessageRecords[record.message] = record;
+
+    if (record.status === "SAFE") {
+      return;
+    }
+
+    if (typeof window !== "undefined" && (window as any).VerifyFirstOverlay) {
+      try {
+        const messageOverlayRecord = {
+          url: record.message,
+          status: record.status,
+          risk_score: record.risk_score,
+          reasons: record.reasons || [],
+          timestamp: record.timestamp,
+          eventId: record.eventId,
+          assetType: "message" as const,
+          messagePreview: record.messagePreview || record.message.slice(0, 100),
+        };
+        const allRecords = [
+          ...Object.values(currentChatRecords),
+          ...Object.values(currentFileRecords).map((r: any) => ({
+            url: r.filename,
+            status: r.status,
+            risk_score: r.risk_score,
+            reasons: r.reasons || [],
+            timestamp: r.timestamp,
+            eventId: r.eventId,
+            assetType: "file" as const,
+            filename: r.filename,
+          })),
+          ...Object.values(currentMessageRecords).map((r: any) => ({
+            url: r.message,
+            status: r.status,
+            risk_score: r.risk_score,
+            reasons: r.reasons || [],
+            timestamp: r.timestamp,
+            eventId: r.eventId,
+            assetType: "message" as const,
+            messagePreview: r.messagePreview || r.message.slice(0, 100),
+          })),
+        ];
+        (window as any).VerifyFirstOverlay.showVerifyFirstWarning(messageOverlayRecord, allRecords);
+      } catch (e: any) {
+        console.error(`[VerifyFirst] Error displaying message overlay: ${e?.message || e}`);
+      }
+    }
+  }
+
+  /**
    * Listen for ANALYSIS_RESULT messages pushed from the service worker.
    * This two-way delivery mechanism is more reliable than relying solely
    * on the sendResponse callback of the original ANALYZE_URL request.
@@ -663,6 +1076,18 @@
 
         if (message && message.type === "ANALYSIS_RESULT" && message.record) {
           handleAnalysisResult(message.record, message.chatId);
+          sendResponse({ received: true });
+          return false;
+        }
+
+        if (message && message.type === "FILE_ANALYSIS_RESULT" && message.record) {
+          handleFileAnalysisResult(message.record, message.chatId);
+          sendResponse({ received: true });
+          return false;
+        }
+
+        if (message && message.type === "MESSAGE_ANALYSIS_RESULT" && message.record) {
+          handleMessageAnalysisResult(message.record, message.chatId);
           sendResponse({ received: true });
           return false;
         }
@@ -748,6 +1173,10 @@
     currentChatId = "";
     discoveredUrls.clear();
     currentChatRecords = {};
+    discoveredFiles.clear();
+    currentFileRecords = {};
+    discoveredMessages.clear();
+    currentMessageRecords = {};
     if (typeof window !== "undefined" && (window as any).VerifyFirstOverlay) {
       (window as any).VerifyFirstOverlay.resetDisplayedWarnings();
     }
