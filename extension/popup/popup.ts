@@ -1,346 +1,121 @@
 /**
- * VerifyFirst — Extension Popup Controller (Phase 2.1)
- * 
- * Manages clean cybersecurity popup dashboard, link selection, and
- * Understand More detailed indicator breakdown.
- * 
+ * VerifyFirst — Popup Launcher Controller
+ *
+ * Lightweight popup that:
+ * 1. Shows real-time security statistics (safe/suspicious/dangerous counts)
+ * 2. Opens the full in-page Security Center on the active WhatsApp tab
+ * 3. Handles edge cases (non-WhatsApp tabs, extension context issues)
+ *
  * ALL dynamic untrusted strings are rendered using XSS-safe textContent.
  */
 
-interface DetectionReason {
-  rule: string;
-  message: string;
-}
-
-interface AnalysisRecord {
-  url: string;
-  status: "SAFE" | "SUSPICIOUS" | "DANGEROUS" | "ANALYSIS_UNAVAILABLE";
-  risk_score: number | null;
-  reasons: DetectionReason[];
-  timestamp: number;
-}
-
-interface TabScanState {
-  chatId: string;
-  generation: number;
-  urls: Record<string, AnalysisRecord>;
-  lastUpdated: number;
-}
-
 (function () {
-  let currentRecords: AnalysisRecord[] = [];
-  let selectedIndex: number = 0;
+  const btnOpen = document.getElementById("btn-open-center") as HTMLButtonElement;
+  const launcherStatus = document.getElementById("launcher-status") as HTMLDivElement;
+  const footerText = document.getElementById("footer-text") as HTMLSpanElement;
 
-  // Views
-  const viewEmpty = document.getElementById("view-empty") as HTMLDivElement;
-  const viewMain = document.getElementById("view-main") as HTMLDivElement;
-  const viewDetails = document.getElementById("view-details") as HTMLDivElement;
+  const statSafe = document.getElementById("stat-safe") as HTMLDivElement;
+  const statSuspicious = document.getElementById("stat-suspicious") as HTMLDivElement;
+  const statDangerous = document.getElementById("stat-dangerous") as HTMLDivElement;
 
-  // Main View Elements
-  const statusBadge = document.getElementById("status-badge") as HTMLDivElement;
-  const statusText = document.getElementById("status-text") as HTMLSpanElement;
-  const scoreNum = document.getElementById("score-num") as HTMLDivElement;
-  const urlBox = document.getElementById("url-box") as HTMLDivElement;
-  const indicatorSummaryNote = document.getElementById("indicator-summary-note") as HTMLDivElement;
+  let activeWhatsAppTabId: number | undefined;
 
-  const multiLinksSection = document.getElementById("multi-links-section") as HTMLDivElement;
-  const multiLinksTitle = document.getElementById("multi-links-title") as HTMLDivElement;
-  const linksList = document.getElementById("links-list") as HTMLDivElement;
-
-  const btnUnderstandMore = document.getElementById("btn-understand-more") as HTMLButtonElement;
-  const btnBack = document.getElementById("btn-back") as HTMLButtonElement;
-
-  // Details View Elements
-  const detailsStatusBadge = document.getElementById("details-status-badge") as HTMLDivElement;
-  const detailsStatusText = document.getElementById("details-status-text") as HTMLSpanElement;
-  const detailsScoreNum = document.getElementById("details-score-num") as HTMLDivElement;
-  const detailsUrlBox = document.getElementById("details-url-box") as HTMLDivElement;
-  const indicatorsContainer = document.getElementById("indicators-container") as HTMLDivElement;
-
-  function formatRuleName(rule: string): string {
-    return rule
-      .toLowerCase()
-      .split("_")
-      .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-      .join(" ");
-  }
-
-  function applyStatusBadgeStyle(badge: HTMLElement, textEl: HTMLElement, status: string): void {
-    badge.className = "status-badge";
-
-    if (status === "SAFE") {
-      badge.classList.add("status-safe");
-      textEl.textContent = "✓ SAFE";
-    } else if (status === "SUSPICIOUS") {
-      badge.classList.add("status-suspicious");
-      textEl.textContent = "⚠ SUSPICIOUS";
-    } else if (status === "DANGEROUS") {
-      badge.classList.add("status-dangerous");
-      textEl.textContent = "✕ DANGEROUS";
-    } else {
-      badge.classList.add("status-unavailable");
-      textEl.textContent = "⚠ ANALYSIS UNAVAILABLE";
-    }
-  }
-
-  function renderMainView(): void {
-    if (currentRecords.length === 0) {
-      viewEmpty.classList.add("active");
-      viewMain.classList.remove("active");
-      viewDetails.classList.remove("active");
-      return;
-    }
-
-    viewEmpty.classList.remove("active");
-    viewMain.classList.add("active");
-    viewDetails.classList.remove("active");
-
-    const record = currentRecords[selectedIndex];
-    if (!record) return;
-
-    applyStatusBadgeStyle(statusBadge, statusText, record.status);
-
-    if (record.status === "ANALYSIS_UNAVAILABLE") {
-      scoreNum.textContent = "— / 100";
-    } else {
-      scoreNum.textContent = `${record.risk_score ?? 0} / 100`;
-    }
-
-    urlBox.textContent = record.url;
-
-    // Indicator Summary Note
-    if (record.status === "SAFE") {
-      const count = record.reasons.length;
-      if (count === 0) {
-        indicatorSummaryNote.textContent = "No suspicious indicators detected.";
-      } else {
-        indicatorSummaryNote.textContent = `${count} low-risk indicator${count === 1 ? "" : "s"} detected`;
-      }
-    } else if (record.status === "SUSPICIOUS") {
-      const count = record.reasons.length;
-      indicatorSummaryNote.textContent = `${count} suspicious indicator${count === 1 ? "" : "s"} detected`;
-    } else if (record.status === "DANGEROUS") {
-      indicatorSummaryNote.textContent = "We recommend that you do not open this link.";
-    } else {
-      indicatorSummaryNote.textContent = "VerifyFirst could not analyze this link right now.";
-    }
-
-    // Multiple Links List Selector
-    if (currentRecords.length > 1) {
-      multiLinksSection.style.display = "block";
-      multiLinksTitle.textContent = `${currentRecords.length} LINKS ANALYZED`;
-      linksList.innerHTML = "";
-
-      currentRecords.forEach((item, idx) => {
-        const row = document.createElement("div");
-        row.className = `link-row ${idx === selectedIndex ? "active" : ""}`;
-        row.addEventListener("click", () => {
-          selectedIndex = idx;
-          renderMainView();
-        });
-
-        const rowUrl = document.createElement("div");
-        rowUrl.className = "link-row-url";
-        rowUrl.textContent = item.url;
-
-        const rowTag = document.createElement("div");
-        rowTag.className = `link-row-tag tag-${item.status.toLowerCase()}`;
-        if (item.status === "SAFE") rowTag.textContent = "SAFE";
-        else if (item.status === "SUSPICIOUS") rowTag.textContent = `${item.risk_score ?? "N/A"}`;
-        else if (item.status === "DANGEROUS") rowTag.textContent = `${item.risk_score ?? "N/A"}`;
-        else rowTag.textContent = "N/A";
-
-        row.appendChild(rowUrl);
-        row.appendChild(rowTag);
-        linksList.appendChild(row);
-      });
-    } else {
-      multiLinksSection.style.display = "none";
-    }
-  }
-
-  function renderDetailsView(): void {
-    const record = currentRecords[selectedIndex];
-    if (!record) return;
-
-    viewMain.classList.remove("active");
-    viewDetails.classList.add("active");
-
-    applyStatusBadgeStyle(detailsStatusBadge, detailsStatusText, record.status);
-
-    if (record.status === "ANALYSIS_UNAVAILABLE") {
-      detailsScoreNum.textContent = "— / 100";
-    } else {
-      detailsScoreNum.textContent = `${record.risk_score ?? 0} / 100`;
-    }
-
-    detailsUrlBox.textContent = record.url;
-
-    // Clear indicators container
-    indicatorsContainer.innerHTML = "";
-
-    if (record.status === "ANALYSIS_UNAVAILABLE") {
-      const card = document.createElement("div");
-      card.className = "indicator-card";
-      const title = document.createElement("div");
-      title.className = "indicator-rule-title";
-      title.textContent = "Analysis Unavailable";
-      const desc = document.createElement("div");
-      desc.className = "indicator-rule-desc";
-      desc.textContent = "The VerifyFirst backend detection service could not complete the security analysis for this link.";
-      card.appendChild(title);
-      card.appendChild(desc);
-      indicatorsContainer.appendChild(card);
-      return;
-    }
-
-    if (record.reasons.length === 0) {
-      const card = document.createElement("div");
-      card.className = "indicator-card";
-      const title = document.createElement("div");
-      title.className = "indicator-rule-title";
-      title.textContent = "No Detection Reasons";
-      const desc = document.createElement("div");
-      desc.className = "indicator-rule-desc";
-      desc.textContent = "No specific detection reasons were provided.";
-      card.appendChild(title);
-      card.appendChild(desc);
-      indicatorsContainer.appendChild(card);
-      return;
-    }
-
-    record.reasons.forEach((reason) => {
-      const card = document.createElement("div");
-      card.className = "indicator-card";
-
-      const title = document.createElement("div");
-      title.className = "indicator-rule-title";
-      title.textContent = formatRuleName(reason.rule);
-
-      const desc = document.createElement("div");
-      desc.className = "indicator-rule-desc";
-      desc.textContent = reason.message;
-
-      card.appendChild(title);
-      card.appendChild(desc);
-      indicatorsContainer.appendChild(card);
-    });
-  }
-
-  // Event Handlers
-  btnUnderstandMore.addEventListener("click", () => {
-    currentView = "DETAILS";
-    renderDetailsView();
-  });
-  btnBack.addEventListener("click", () => {
-    currentView = "MAIN";
-    renderMainView();
-  });
-
-  // Load results directly from the active tab's content script (authoritative current chat state)
-  function loadResults(): void {
+  /**
+   * Check if the active tab is WhatsApp Web and store the tab ID.
+   */
+  function checkActiveTab(callback: (isWhatsApp: boolean) => void): void {
     if (typeof chrome === "undefined" || !chrome.tabs || !chrome.tabs.query) {
-      fallbackLoadFromServiceWorker();
+      callback(false);
       return;
     }
 
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs: any[]) => {
-      const activeTabId = tabs && tabs[0] ? tabs[0].id : undefined;
-      if (activeTabId === undefined) {
-        fallbackLoadFromServiceWorker();
-        return;
-      }
-
-      chrome.tabs.sendMessage(activeTabId, { type: "GET_CURRENT_CHAT_STATE" }, (response: any) => {
-        if (chrome.runtime.lastError || !response) {
-          // Content script might not be injected or ready; fallback to service worker
-          fallbackLoadFromServiceWorker();
-          return;
-        }
-
-        const chatId = response.chatId || "";
-        const urlsObj = response.urls || {};
-        const records: AnalysisRecord[] = Object.values(urlsObj);
-        records.sort((a, b) => b.timestamp - a.timestamp);
-
-        console.log(`[VerifyFirst] Popup rendering current chat: ${chatId}`);
-        console.log(`[VerifyFirst] Popup rendering ${records.length} URLs`);
-
-        const previousSelectedUrl = currentRecords[selectedIndex]?.url;
-
-        currentRecords = records;
-        selectedIndex = 0;
-        if (previousSelectedUrl) {
-          const newIndex = currentRecords.findIndex((r) => r.url === previousSelectedUrl);
-          if (newIndex !== -1) {
-            selectedIndex = newIndex;
-          }
-        }
-
-        if (currentView === "DETAILS") {
-          renderDetailsView();
-        } else {
-          renderMainView();
-        }
-      });
-    });
-  }
-
-  function fallbackLoadFromServiceWorker(activeTabId?: number): void {
-    chrome.runtime.sendMessage({ type: "GET_TAB_RESULTS", tabId: activeTabId }, (response: any) => {
-      if (chrome.runtime.lastError || !response || !response.success || !response.state) {
-        currentRecords = [];
-        renderMainView();
-        return;
-      }
-
-      const state: TabScanState = response.state;
-      const records = Object.values(state.urls || {});
-      records.sort((a, b) => b.timestamp - a.timestamp);
-
-      console.log(`[VerifyFirst] Popup rendering fallback state: ${state.chatId || "unknown"}`);
-      console.log(`[VerifyFirst] Popup rendering ${records.length} URLs`);
-
-      const previousSelectedUrl = currentRecords[selectedIndex]?.url;
-
-      currentRecords = records;
-      selectedIndex = 0;
-      if (previousSelectedUrl) {
-        const newIndex = currentRecords.findIndex((r) => r.url === previousSelectedUrl);
-        if (newIndex !== -1) {
-          selectedIndex = newIndex;
-        }
-      }
-
-      if (currentView === "DETAILS") {
-        renderDetailsView();
+      const tab = tabs && tabs[0];
+      if (tab && tab.url && tab.url.includes("web.whatsapp.com") && tab.id !== undefined) {
+        activeWhatsAppTabId = tab.id;
+        callback(true);
       } else {
-        renderMainView();
+        activeWhatsAppTabId = undefined;
+        callback(false);
       }
     });
   }
 
-  // Auto-refresh interval handle
-  let refreshInterval: number | null = null;
+  /**
+   * Load security statistics from the background service worker.
+   */
+  function loadStats(): void {
+    chrome.runtime.sendMessage({ type: "GET_SECURITY_STATISTICS" }, (response: any) => {
+      if (chrome.runtime.lastError || !response || !response.success || !response.data) {
+        return;
+      }
 
-  let currentView: "MAIN" | "DETAILS" = "MAIN";
+      const stats = response.data;
 
-  document.addEventListener("DOMContentLoaded", () => {
-    // Step 1: Tell service worker to trigger a scan in the content script
-    chrome.runtime.sendMessage({ type: "TRIGGER_SCAN" });
+      const safeCount = statSafe.querySelector(".stat-count");
+      const suspiciousCount = statSuspicious.querySelector(".stat-count");
+      const dangerousCount = statDangerous.querySelector(".stat-count");
 
-    // Step 2: Load results after a brief delay to let the scan complete
-    window.setTimeout(loadResults, 300);
+      if (safeCount) safeCount.textContent = String(stats.safeCount ?? 0);
+      if (suspiciousCount) suspiciousCount.textContent = String(stats.suspiciousCount ?? 0);
+      if (dangerousCount) dangerousCount.textContent = String(stats.dangerousCount ?? 0);
+    });
+  }
 
-    // Step 3: Auto-refresh every 1.5 seconds while popup is open
-    refreshInterval = window.setInterval(loadResults, 1500);
-  });
+  /**
+   * Open the in-page Security Center on the active WhatsApp tab.
+   */
+  function openSecurityCenter(): void {
+    if (activeWhatsAppTabId === undefined) return;
 
-  // Clean up interval when popup closes
-  window.addEventListener("unload", () => {
-    if (refreshInterval !== null) {
-      window.clearInterval(refreshInterval);
-      refreshInterval = null;
+    // Send OPEN_SECURITY_CENTER message to the active tab's content script
+    chrome.tabs.sendMessage(activeWhatsAppTabId, { type: "OPEN_SECURITY_CENTER" }, (response: any) => {
+      if (chrome.runtime.lastError) {
+        // Try via service worker relay as fallback
+        chrome.runtime.sendMessage({ type: "OPEN_SECURITY_CENTER" });
+      }
+    });
+
+    // Close the popup after a brief delay to let the message dispatch
+    setTimeout(() => {
+      window.close();
+    }, 150);
+  }
+
+  /**
+   * Update UI based on whether we're on a WhatsApp tab.
+   */
+  function updateUI(isWhatsApp: boolean): void {
+    if (isWhatsApp) {
+      btnOpen.disabled = false;
+      launcherStatus.classList.remove("inactive");
+      footerText.textContent = "Scanning links in real-time";
+    } else {
+      btnOpen.disabled = true;
+      launcherStatus.classList.add("inactive");
+
+      const statusText = launcherStatus.querySelector(".status-text");
+      if (statusText) statusText.textContent = "Open WhatsApp Web";
+
+      footerText.textContent = "Navigate to web.whatsapp.com to activate";
     }
+  }
+
+  // Event Handlers
+  btnOpen.addEventListener("click", openSecurityCenter);
+
+  // Initialize
+  document.addEventListener("DOMContentLoaded", () => {
+    checkActiveTab((isWhatsApp) => {
+      updateUI(isWhatsApp);
+
+      if (isWhatsApp) {
+        // Trigger a scan in the content script
+        chrome.runtime.sendMessage({ type: "TRIGGER_SCAN" });
+      }
+
+      // Load stats regardless of tab
+      loadStats();
+    });
   });
 })();

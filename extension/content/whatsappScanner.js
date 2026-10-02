@@ -391,11 +391,8 @@
             console.log("[VerifyFirst Source3] message bubble inspected");
             let text = bubble.innerText;
             if (typeof text !== "string") {
-                // Fallback for JSDOM testing
-                const clone = bubble.cloneNode(true);
-                const hidden = clone.querySelectorAll("[hidden], [aria-hidden='true']");
-                hidden.forEach(el => el.remove());
-                text = clone.textContent || "";
+                // Fallback for JSDOM testing. Avoid cloneNode(true) to prevent 403 errors on WhatsApp media requests.
+                text = bubble.textContent || "";
             }
             if (!text.toLowerCase().includes("http://") && !text.toLowerCase().includes("https://"))
                 return;
@@ -489,10 +486,8 @@
                 return;
             let text = bubble.innerText;
             if (typeof text !== "string") {
-                const clone = bubble.cloneNode(true);
-                const hidden = clone.querySelectorAll("[hidden], [aria-hidden='true']");
-                hidden.forEach(el => el.remove());
-                text = clone.textContent || "";
+                // Fallback for JSDOM testing. Avoid cloneNode(true) to prevent 403 errors on WhatsApp media requests.
+                text = bubble.textContent || "";
             }
             const normalized = normalizeMessageText(text);
             if (!normalized)
