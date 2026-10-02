@@ -200,7 +200,7 @@ async def test_e2e_heuristic_and_intelligence_evidence_coexist():
     "url,is_malicious,expected_status,expected_score",
     [
         ("https://example.com", False, "SAFE", 0),
-        ("https://paypal.com.attacker.com", False, "SUSPICIOUS", 60),
+        ("https://paypal.com.attacker.com", False, "SUSPICIOUS", 46),
     ],
 )
 async def test_e2e_clean_intelligence_matrix(

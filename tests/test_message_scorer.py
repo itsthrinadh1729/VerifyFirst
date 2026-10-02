@@ -1,6 +1,17 @@
 """Tests for message detection scoring."""
 from backend.detection.message_detection.rules import MessageRuleResult
-from backend.detection.message_detection.scorer import calculate_score_and_status
+from backend.detection.message_detection.scorer import calculate_score_and_status, normalize_message_risk_score, MAX_MESSAGE_RAW_SCORE
+
+def test_continuous_message_score_normalization_precision():
+    """Verify that the normalizer produces exact continuous integers (not multiples of 5)."""
+    assert normalize_message_risk_score(40, MAX_MESSAGE_RAW_SCORE) == 40
+    assert normalize_message_risk_score(41, MAX_MESSAGE_RAW_SCORE) == 41
+    assert normalize_message_risk_score(55, MAX_MESSAGE_RAW_SCORE) == 55
+    assert normalize_message_risk_score(60, MAX_MESSAGE_RAW_SCORE) == 60
+    assert normalize_message_risk_score(73, MAX_MESSAGE_RAW_SCORE) == 73
+    assert normalize_message_risk_score(94, MAX_MESSAGE_RAW_SCORE) == 94
+    assert normalize_message_risk_score(127, MAX_MESSAGE_RAW_SCORE) == 100
+
 
 
 def test_scorer_no_rules():

@@ -67,7 +67,7 @@ async def test_file_macro_document(client):
     response = await client.post("/api/v1/analyze-file", json={"filename": "report.docm"})
     assert response.status_code == 200
     data = response.json()
-    assert data["risk_score"] >= 25
+    assert data["risk_score"] >= 24  # DOCUMENT_MACRO_EXTENSION raw 25 -> normalized round(25/105*100) = 24
 
 
 @pytest.mark.asyncio

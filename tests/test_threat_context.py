@@ -31,7 +31,8 @@ def test_domain_impersonation_context():
 
     context = build_threat_context(analysis, assessment)
 
-    assert detection.risk_score == 60
+    # BRAND_IMPERSONATION(35) + DECEPTIVE_DOMAIN_STRUCTURE(25) = raw 60 -> normalized 46
+    assert detection.risk_score == 46
     assert detection.status == "SUSPICIOUS"
 
     assert assessment.severity == "HIGH"

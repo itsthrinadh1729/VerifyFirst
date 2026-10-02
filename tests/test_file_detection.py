@@ -31,8 +31,22 @@ from backend.detection.file_detection.rules import evaluate_file_rules
 from backend.detection.file_detection.scorer import (
     analyze_file_security,
     classify_file_risk_score,
+    normalize_file_risk_score,
+    MAX_FILE_RAW_SCORE,
 )
 from backend.detection.file_detection.service import analyze_file
+
+def test_continuous_file_score_normalization_precision():
+    """Verify that the normalizer produces exact continuous integers (not multiples of 5)."""
+    assert normalize_file_risk_score(40, MAX_FILE_RAW_SCORE) == 38
+    assert normalize_file_risk_score(41, MAX_FILE_RAW_SCORE) == 39
+    assert normalize_file_risk_score(55, MAX_FILE_RAW_SCORE) == 52
+    assert normalize_file_risk_score(60, MAX_FILE_RAW_SCORE) == 57
+    assert normalize_file_risk_score(73, MAX_FILE_RAW_SCORE) == 70
+    assert normalize_file_risk_score(94, MAX_FILE_RAW_SCORE) == 90
+    assert normalize_file_risk_score(127, MAX_FILE_RAW_SCORE) == 100
+
+
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -383,7 +397,7 @@ class TestScoringPipeline:
 
     def test_dangerous_macro_document(self):
         result = analyze_file("document.docm")
-        assert result.risk_score >= 25
+        assert result.risk_score >= 24  # raw 25 -> normalized round(25/105*100) = 24
 
     def test_score_clamped_to_100(self):
         """Even with many triggers, score should not exceed 100."""

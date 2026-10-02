@@ -148,7 +148,7 @@ async def test_analyze_integration_returns_structured_reasons():
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == "SUSPICIOUS"
-        assert data["risk_score"] == 40
+        assert data["risk_score"] == 31
         assert len(data["reasons"]) == 1
         assert data["reasons"][0]["rule"] == "IP_ADDRESS_HOST"
         assert "IP address" in data["reasons"][0]["message"]
