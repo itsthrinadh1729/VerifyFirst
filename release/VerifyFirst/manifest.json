@@ -16,10 +16,13 @@
     "type": "module"
   },
   "permissions": [
-    "storage"
+    "storage",
+    "activeTab",
+    "tabs"
   ],
   "host_permissions": [
-    "https://web.whatsapp.com/*"
+    "https://web.whatsapp.com/*",
+    "http://localhost:8000/*"
   ],
   "content_scripts": [
     {

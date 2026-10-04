@@ -85,6 +85,11 @@ const FORBIDDEN_STRINGS = [
   "launcher-footer",
   "launcher-brand",
   "launcher-subtitle",
+  "default_popup",
+  "popup/",
+  "popup.html",
+  "Open Security Center launcher",
+  "View Details",
 ];
 
 /**

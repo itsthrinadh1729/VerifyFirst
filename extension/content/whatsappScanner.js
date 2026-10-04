@@ -805,7 +805,7 @@
             console.log(`[VerifyFirst] handleAnalysisResult dropped: already rendered`);
             return;
         }
-        // Store in current chat records (single source of truth for popup)
+        // Store in current chat records (single source of truth for Security Center)
         currentChatRecords[record.url] = record;
         // SAFE links remain silent
         if (record.status === "SAFE") {
@@ -966,7 +966,7 @@
                     return false;
                 }
                 if (message && message.type === "TRIGGER_SCAN") {
-                    console.log("[VerifyFirst] TRIGGER_SCAN received from popup");
+                    console.log("[VerifyFirst] TRIGGER_SCAN received from Security Center");
                     scanActiveChatForUrls(false);
                     sendResponse({ triggered: true });
                     return false;

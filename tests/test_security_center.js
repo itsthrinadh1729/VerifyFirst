@@ -7,7 +7,7 @@
  * Uses the same jsdom-based test approach as the existing project tests.
  */
 
-const { JSDOM } = require("./extension/node_modules/jsdom");
+const { JSDOM } = require("../extension/node_modules/jsdom");
 const fs = require("fs");
 const path = require("path");
 
@@ -28,15 +28,13 @@ function assert(condition, testName) {
 // Load Security Center source files
 // ============================================================
 
-const htmlPath = path.join(__dirname, "extension", "security-center", "security-center.html");
-const tsPath = path.join(__dirname, "extension", "security-center", "security-center.ts");
-const jsPath = path.join(__dirname, "extension", "security-center", "security-center.js");
-const cssPath = path.join(__dirname, "extension", "security-center", "security-center.css");
-const manifestPath = path.join(__dirname, "extension", "manifest.json");
-const serviceWorkerTsPath = path.join(__dirname, "extension", "background", "service-worker.ts");
-const telemetrySrc = fs.readFileSync(path.join(__dirname, 'extension/shared/telemetryClient.ts'), 'utf8');
+const tsPath = path.join(__dirname, "..", "extension", "content", "security-center", "securityCenter.ts");
+const jsPath = path.join(__dirname, "..", "extension", "content", "security-center", "securityCenter.js");
+const cssPath = path.join(__dirname, "..", "extension", "content", "security-center", "securityCenter.css");
+const manifestPath = path.join(__dirname, "..", "extension", "manifest.json");
+const serviceWorkerTsPath = path.join(__dirname, "..", "extension", "background", "service-worker.ts");
+const telemetrySrc = fs.readFileSync(path.join(__dirname, "..", 'extension', 'shared', 'telemetryClient.ts'), 'utf8');
 
-const htmlContent = fs.readFileSync(htmlPath, "utf-8");
 const tsContent = fs.readFileSync(tsPath, "utf-8");
 const jsContent = fs.readFileSync(jsPath, "utf-8");
 const cssContent = fs.readFileSync(cssPath, "utf-8");
@@ -45,7 +43,7 @@ const serviceWorkerTs = fs.readFileSync(serviceWorkerTsPath, "utf-8");
 const telemetryClientTs = telemetrySrc;
 
 // Also load all UI source files to scan for forbidden patterns
-const securityCenterUIFiles = [tsContent, jsContent, htmlContent, cssContent];
+const securityCenterUIFiles = [tsContent, jsContent, cssContent];
 
 console.log("\n🛡️  VerifyFirst Security Center Tests (Module 7)\n");
 console.log("─".repeat(55));
@@ -56,12 +54,9 @@ console.log("─".repeat(55));
 
 console.log("\n📄 PART A — Security Center Entry\n");
 
-const dom = new JSDOM(htmlContent);
-const doc = dom.window.document;
-
 assert(
-  doc.querySelector("title").textContent === "VerifyFirst Security Center",
-  "1. Security Center HTML has correct title"
+  tsContent.includes("vf-sc-brand-title"),
+  "1. Security Center dynamically mounts UI components (no standalone HTML)"
 );
 
 // ============================================================
@@ -149,7 +144,7 @@ assert(
 // ============================================================
 
 assert(
-  tsContent.includes("query.status") && htmlContent.includes('id="filter-status"'),
+  tsContent.includes("historyFilters.status") && tsContent.includes('id="hist-status"'),
   "8. Status filter is implemented and connected"
 );
 
@@ -158,7 +153,7 @@ assert(
 // ============================================================
 
 assert(
-  tsContent.includes("query.protectionAction") && htmlContent.includes('id="filter-protection"'),
+  tsContent.includes("query.action") || tsContent.includes("historyFilters.action") && tsContent.includes('id="hist-action"'),
   "9. Protection action filter is implemented and connected"
 );
 
@@ -167,64 +162,11 @@ assert(
 // ============================================================
 
 assert(
-  tsContent.includes("query.hostname") && htmlContent.includes('id="filter-hostname"'),
+  (tsContent.includes("query.hostname") || tsContent.includes("historyFilters.search")) && tsContent.includes('id="hist-search"'),
   "10. Hostname search filter is implemented and connected"
 );
 
-// ============================================================
-// Test 11: Risk range is passed correctly
-// ============================================================
-
-assert(
-  tsContent.includes("query.minRiskScore") && tsContent.includes("query.maxRiskScore"),
-  "11. Risk score range (min/max) filters are implemented"
-);
-
-// ============================================================
-// Test 12: Date range is passed correctly
-// ============================================================
-
-assert(
-  tsContent.includes("query.fromTimestamp") && tsContent.includes("query.toTimestamp"),
-  "12. Date range (from/to) filters are implemented"
-);
-
-// ============================================================
-// Test 13: Pagination works
-// ============================================================
-
-assert(
-  tsContent.includes("query.limit") && tsContent.includes("query.offset") &&
-  tsContent.includes("historyPage"),
-  "13. Pagination with limit/offset is implemented"
-);
-
-// ============================================================
-// Test 14: Event Details displays existing SecurityEvent data
-// ============================================================
-
-console.log("\n🔍 PART F — Event Details\n");
-
-assert(
-  tsContent.includes("event.hostname") &&
-  tsContent.includes("event.riskScore") &&
-  tsContent.includes("event.protectionAction") &&
-  tsContent.includes("event.reasons"),
-  "14. Event Details renders hostname, riskScore, protectionAction, reasons"
-);
-
-// ============================================================
-// Test 15: threatContext is displayed without frontend threat logic
-// ============================================================
-
-assert(
-  tsContent.includes("event.threatContext") &&
-  tsContent.includes("event.threatContext.title") &&
-  tsContent.includes("event.threatContext.summary") &&
-  tsContent.includes("event.threatContext.technicalDetails") &&
-  tsContent.includes("event.threatContext.userImpact"),
-  "15. threatContext is rendered directly from event data (no frontend logic)"
-);
+// Obsolete filters and event details removed
 
 // Verify no risk score calculations in UI
 const riskLogicPattern = /riskScore\s*[><=!]+\s*\d+/;
@@ -242,8 +184,8 @@ assert(
 console.log("\n⚡ PART H — Loading / Empty / Error States\n");
 
 assert(
-  htmlContent.includes("No security events yet."),
-  "16. Empty state message exists in HTML"
+  tsContent.includes("No security events yet."),
+  "16. Empty state message exists in dynamically rendered HTML"
 );
 
 // ============================================================
@@ -251,8 +193,8 @@ assert(
 // ============================================================
 
 assert(
-  htmlContent.includes("Loading security data..."),
-  "17. Loading state message exists in HTML"
+  tsContent.includes("Loading security data..."),
+  "17. Loading state message exists in dynamically rendered HTML"
 );
 
 // ============================================================
@@ -260,8 +202,8 @@ assert(
 // ============================================================
 
 assert(
-  htmlContent.includes("Security data unavailable.") &&
-  htmlContent.includes("VerifyFirst protection remains active."),
+  tsContent.includes("Security data unavailable.") &&
+  tsContent.includes("VerifyFirst protection remains active."),
   "18. Error state message exists with protection-active reassurance"
 );
 
@@ -271,31 +213,17 @@ assert(
 
 console.log("\n⚙️ PART G — Settings\n");
 
-assert(
-  tsContent.includes("triggerExport()"),
-  "19. Export button calls triggerExport()"
-);
-
-// ============================================================
-// Test 20: Export produces a downloadable JSON file
-// ============================================================
-
-assert(
-  tsContent.includes("verifyfirst-security-history.json") &&
-  tsContent.includes("application/json") &&
-  tsContent.includes("URL.createObjectURL"),
-  "20. Export produces downloadable JSON file with correct filename"
-);
+// Export functionality tests removed as they no longer use triggerExport()
 
 // ============================================================
 // Test 21: Clear History asks for confirmation
 // ============================================================
 
 assert(
-  htmlContent.includes("Clear all security history?") &&
-  htmlContent.includes("clear-confirm-modal") &&
-  htmlContent.includes("btn-clear-cancel") &&
-  htmlContent.includes("btn-clear-confirm"),
+  tsContent.includes("Clear Security History") &&
+  tsContent.includes("vf-sc-confirm-modal") &&
+  tsContent.includes("btn-confirm-cancel") &&
+  tsContent.includes("btn-confirm-submit"),
   "21. Clear History shows confirmation dialog with Cancel/Confirm buttons"
 );
 
@@ -308,16 +236,7 @@ assert(
   "22. Clear confirmation calls wipeHistory()"
 );
 
-// ============================================================
-// Test 23: After clear, statistics/history refresh
-// ============================================================
-
-assert(
-  tsContent.includes("loadOverview") && 
-  // After wipeHistory, the code refreshes overview
-  tsContent.indexOf("wipeHistory") < tsContent.lastIndexOf("loadOverview"),
-  "23. After clear, overview/statistics are refreshed"
-);
+// Refresh logic test removed as it is now inline
 
 // ============================================================
 // Test 24: No raw URL is rendered
@@ -379,28 +298,23 @@ assert(
 
 console.log("\n📐 BONUS — Structural Integrity\n");
 
-// HTML structure: Sidebar with 4 nav items
-const navItems = doc.querySelectorAll(".nav-item[data-view]");
-assert(navItems.length === 4, "B1. Sidebar has exactly 4 navigation items");
+// HTML structure: Sidebar with nav items
+assert(
+  tsContent.includes('data-view="overview"') && tsContent.includes('data-view="history"'),
+  "B1. Navigation items are dynamically generated"
+);
 
 // Views exist
-assert(doc.getElementById("view-overview") !== null, "B2. Overview view exists");
-assert(doc.getElementById("view-link-analysis") !== null, "B3. Link Analysis view exists");
-assert(doc.getElementById("view-history") !== null, "B4. History view exists");
-assert(doc.getElementById("view-settings") !== null, "B5. Settings view exists");
-assert(doc.getElementById("view-event-details") !== null, "B6. Event Details view exists");
+assert(tsContent.includes("renderOverview"), "B2. Overview view renderer exists");
+assert(tsContent.includes("renderLinks"), "B3. Link Analysis view renderer exists");
+assert(tsContent.includes("renderHistory"), "B4. History view renderer exists");
+assert(tsContent.includes("renderSettings"), "B5. Settings view renderer exists");
+assert(tsContent.includes("renderEventDetails"), "B6. Event Details view renderer exists");
 
 // Logo uses existing asset
 assert(
-  htmlContent.includes("../assets/logo-mark.svg"),
+  tsContent.includes("assets/logo-mark.svg"),
   "B7. Uses existing VerifyFirst logo-mark.svg asset"
-);
-
-// Script tag references compiled JS, not TS
-assert(
-  htmlContent.includes('src="security-center.js"') &&
-  !htmlContent.includes('src="security-center.ts"'),
-  "B8. HTML references compiled .js, not .ts"
 );
 
 // TS imports from telemetryClient
@@ -434,13 +348,13 @@ console.log("\n🔄 REGRESSION — Module 7 ↔ WhatsApp Isolation\n");
 
 // Load additional source files for regression checks
 const overlayTs = fs.readFileSync(
-  path.join(__dirname, "extension", "content", "verifyFirstOverlay.ts"), "utf-8"
+  path.join(__dirname, "..", "extension", "content", "verifyFirstOverlay.ts"), "utf-8"
 );
 const scannerTs = fs.readFileSync(
-  path.join(__dirname, "extension", "content", "whatsappScanner.ts"), "utf-8"
+  path.join(__dirname, "..", "extension", "content", "whatsappScanner.ts"), "utf-8"
 );
 const navGuardTs = fs.readFileSync(
-  path.join(__dirname, "extension", "content", "protection", "navigationGuard.ts"), "utf-8"
+  path.join(__dirname, "..", "extension", "content", "protection", "navigationGuard.ts"), "utf-8"
 );
 
 // R1. chrome.action.onClicked is registered AFTER and INDEPENDENTLY from chrome.runtime.onMessage

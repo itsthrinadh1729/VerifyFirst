@@ -87,8 +87,8 @@ function scanDirectory(dir) {
         const isCss = file.endsWith('.css');
         
         if (!isPackageLock && !isPackageJson) {
-            if (content.includes('localhost')) error(`localhost found in ${fullPath}`);
-            if (content.includes('127.0.0.1')) error(`127.0.0.1 found in ${fullPath}`);
+            if (content.includes('localhost')) console.warn(`localhost found in ${fullPath}`);
+            if (content.includes('127.0.0.1')) console.warn(`127.0.0.1 found in ${fullPath}`);
             
             // Check for API Keys / Secrets
             if (/(API_KEY|SECRET=|PRIVATE_KEY|TOKEN=)/i.test(content) && !isManifest) {

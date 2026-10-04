@@ -391,11 +391,8 @@
             console.log("[VerifyFirst Source3] message bubble inspected");
             let text = bubble.innerText;
             if (typeof text !== "string") {
-                // Fallback for JSDOM testing
-                const clone = bubble.cloneNode(true);
-                const hidden = clone.querySelectorAll("[hidden], [aria-hidden='true']");
-                hidden.forEach(el => el.remove());
-                text = clone.textContent || "";
+                // Fallback for JSDOM testing. Avoid cloneNode(true) to prevent 403 errors on WhatsApp media requests.
+                text = bubble.textContent || "";
             }
             if (!text.toLowerCase().includes("http://") && !text.toLowerCase().includes("https://"))
                 return;
@@ -489,10 +486,8 @@
                 return;
             let text = bubble.innerText;
             if (typeof text !== "string") {
-                const clone = bubble.cloneNode(true);
-                const hidden = clone.querySelectorAll("[hidden], [aria-hidden='true']");
-                hidden.forEach(el => el.remove());
-                text = clone.textContent || "";
+                // Fallback for JSDOM testing. Avoid cloneNode(true) to prevent 403 errors on WhatsApp media requests.
+                text = bubble.textContent || "";
             }
             const normalized = normalizeMessageText(text);
             if (!normalized)
@@ -596,6 +591,7 @@
                     chatId: requestChatId,
                 }, (response) => {
                     console.log(`[VerifyFirst] ANALYZE_URL callback for ${url}:`, response);
+                    console.log("[VerifyFirst] ANALYSIS_RESULT received", response);
                     if (!response || !response.success || !response.record) {
                         console.log(`[VerifyFirst] Callback dropped: invalid response`);
                         return;
@@ -620,6 +616,7 @@
                     if (response.record.status !== "SAFE") {
                         if (typeof window !== "undefined" && window.VerifyFirstOverlay) {
                             try {
+                                console.log("[VerifyFirst] Calling showOverlay");
                                 window.VerifyFirstOverlay.showVerifyFirstWarning(response.record, Object.values(currentChatRecords));
                             }
                             catch (e) {
@@ -808,7 +805,7 @@
             console.log(`[VerifyFirst] handleAnalysisResult dropped: already rendered`);
             return;
         }
-        // Store in current chat records (single source of truth for popup)
+        // Store in current chat records (single source of truth for Security Center)
         currentChatRecords[record.url] = record;
         // SAFE links remain silent
         if (record.status === "SAFE") {
@@ -817,6 +814,7 @@
         // Trigger automatic warning for SUSPICIOUS, DANGEROUS, ANALYSIS_UNAVAILABLE
         if (typeof window !== "undefined" && window.VerifyFirstOverlay) {
             try {
+                console.log("[VerifyFirst] Calling showOverlay");
                 window.VerifyFirstOverlay.showVerifyFirstWarning(record, Object.values(currentChatRecords));
             }
             catch (e) {
@@ -952,6 +950,7 @@
                     return false;
                 }
                 if (message && message.type === "ANALYSIS_RESULT" && message.record) {
+                    console.log("[VerifyFirst] ANALYSIS_RESULT received", message);
                     handleAnalysisResult(message.record, message.chatId);
                     sendResponse({ received: true });
                     return false;
@@ -967,7 +966,7 @@
                     return false;
                 }
                 if (message && message.type === "TRIGGER_SCAN") {
-                    console.log("[VerifyFirst] TRIGGER_SCAN received from popup");
+                    console.log("[VerifyFirst] TRIGGER_SCAN received from Security Center");
                     scanActiveChatForUrls(false);
                     sendResponse({ triggered: true });
                     return false;
@@ -980,6 +979,17 @@
                         chatId: currentChatId,
                         urls: currentChatRecords,
                     });
+                    return false;
+                }
+                if (message && message.type === "CLOSE_VERIFYFIRST_OVERLAY") {
+                    console.log(`[VerifyFirst] CLOSE_VERIFYFIRST_OVERLAY received`);
+                    if (typeof window.VerifyFirstOverlay?.hideVerifyFirstOverlay === "function") {
+                        window.VerifyFirstOverlay.hideVerifyFirstOverlay();
+                    }
+                    else if (typeof window.VerifyFirstOverlay?.clearVerifyFirstOverlay === "function") {
+                        window.VerifyFirstOverlay.clearVerifyFirstOverlay();
+                    }
+                    sendResponse({ closed: true });
                     return false;
                 }
                 // Don't return false for unrecognized messages — let other listeners handle them

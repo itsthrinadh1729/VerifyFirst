@@ -79,6 +79,19 @@
         clearVerifyFirstOverlay();
     }
     /**
+     * Hides the overlay and marks all currently pooled warnings as dismissed
+     * so they don't pop back up if a late analysis result arrives.
+     */
+    function hideVerifyFirstOverlay() {
+        // Add all current warnings to dismissed set
+        for (const record of activeWarningPool) {
+            if (record.url) {
+                dismissedWarnings.add(record.url.trim().toLowerCase());
+            }
+        }
+        clearVerifyFirstOverlay();
+    }
+    /**
      * Displays an automatic security warning overlay inside WhatsApp Web.
      */
     function handleDismiss() {
@@ -117,6 +130,154 @@
         }
     }
     let currentViewType = "overview";
+    /**
+     * Shared overlay stylesheet for the Shadow DOM.
+     */
+    const OVERLAY_STYLES = `
+      :host {
+        position: fixed !important;
+        top: 24px !important;
+        right: 24px !important;
+        z-index: 2147483647 !important;
+        display: block !important;
+        pointer-events: none !important;
+      }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      .overlay-card {
+        width: 310px;
+        max-width: min(310px, calc(100vw - 32px));
+        min-height: auto;
+        background: #0B141A;
+        color: #F8FAFC;
+        border-radius: 12px;
+        padding: 12px 14px;
+        font-family: 'Poppins', 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.35);
+        border: 1px solid rgba(148, 163, 184, 0.22);
+        animation: vfFadeSlide 200ms ease-out;
+        pointer-events: auto;
+      }
+      @keyframes vfFadeSlide {
+        from { opacity: 0; transform: translateY(-8px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      .overlay-card.suspicious { border: 1px solid rgba(255, 224, 130, 0.85); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55), 0 0 12px rgba(255, 224, 130, 0.2); }
+      .overlay-card.dangerous { border: 1px solid #F87171; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55), 0 0 14px rgba(248, 113, 113, 0.25); }
+      .overlay-card.analysis_unavailable, .overlay-card.unavailable { border: 1px solid rgba(148, 163, 184, 0.4); }
+      .header { display: flex; align-items: center; justify-content: space-between; padding-bottom: 6px; margin-bottom: 9px; border-bottom: 1px solid rgba(148, 163, 184, 0.15); }
+      .brand { display: flex; align-items: center; }
+      .brand-logo { height: 30px; width: auto; display: block; }
+      .close-btn { background: transparent; border: none; color: #8696A0; font-size: 18px; cursor: pointer; line-height: 1; padding: 0 4px; border-radius: 4px; transition: color 150ms ease; }
+      .close-btn:hover { color: #F8FAFC; }
+      .status-title { font-size: 14px; font-weight: 700; margin-bottom: 8px; display: flex; align-items: center; gap: 5px; }
+      .suspicious .status-title { color: #FFE082; }
+      .dangerous .status-title { color: #F87171; }
+      .analysis_unavailable .status-title, .unavailable .status-title { color: #94A3B8; }
+      .score-row { display: flex; justify-content: space-between; align-items: center; background: #1E2A33; border: 1px solid rgba(148, 163, 184, 0.10); border-radius: 6px; padding: 7px 9px; margin-bottom: 8px; }
+      .score-label { color: #CBD5E1; font-weight: 600; text-transform: uppercase; font-size: 10px; letter-spacing: 0.5px; }
+      .score-val { font-weight: 700; font-size: 16px; color: #F8FAFC; }
+      .explanation-text { font-size: 12px; line-height: 1.4; color: #CBD5E1; margin-bottom: 8px; }
+      .url-box { font-family: SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace; font-size: 12px; color: #E2E8F0; background: #0B141A; padding: 8px 10px; border-radius: 5px; border: 1px solid rgba(148, 163, 184, 0.18); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-bottom: 10px; }
+      .nav-controls { display: flex; align-items: center; gap: 12px; color: #E2E8F0; font-size: 12px; font-weight: 600; }
+      .nav-btn { background: transparent; border: none; color: #8696A0; font-size: 16px; cursor: pointer; padding: 2px 8px; border-radius: 4px; transition: color 150ms ease, background 150ms ease; }
+      .nav-btn:hover { color: #F8FAFC; background: rgba(148, 163, 184, 0.15); }
+      .nav-btn:disabled { color: rgba(134, 150, 160, 0.4); cursor: default; background: transparent; }
+      .actions { display: flex; gap: 6px; justify-content: flex-end; }
+      .action-col { display: flex; flex-direction: column; gap: 8px; }
+      .action-row { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+      .action-row.has-nav { justify-content: space-between; }
+      .btn { font-size: 12px; font-weight: 600; padding: 6px 12px; border-radius: 5px; cursor: pointer; border: none; transition: background-color 150ms ease, color 150ms ease, opacity 150ms ease; }
+      .btn-secondary { background: #1E2A33; border: 1px solid rgba(148, 163, 184, 0.20); color: #CBD5E1; }
+      .btn-secondary:hover { background: #26343B; color: #F8FAFC; }
+      .btn-primary { background: #22D3EE; color: #0B141A; }
+      .btn-primary:hover { opacity: 0.9; }
+      .back-link { background: transparent; border: none; color: #8696A0; font-size: 12px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 4px; padding: 2px 4px; border-radius: 4px; transition: color 150ms ease; }
+      .back-link:hover { color: #F8FAFC; }
+      .section-label { font-size: 10px; font-weight: 600; color: #CBD5E1; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; margin-top: 6px; }
+      .indicators-list { display: flex; flex-direction: column; gap: 6px; max-height: 160px; overflow-y: auto; margin-bottom: 9px; }
+      .indicator-item { background: #1E2A33; border-left: 3px solid #22D3EE; padding: 7px 8px; border-radius: 0 5px 5px 0; }
+      .suspicious .indicator-item { border-left-color: #FFE082; }
+      .dangerous .indicator-item { border-left-color: #F87171; }
+      .analysis_unavailable .indicator-item, .unavailable .indicator-item { border-left-color: #94A3B8; }
+      .indicator-title { font-size: 12px; font-weight: 700; color: #F8FAFC; margin-bottom: 2px; }
+      .indicator-desc { font-size: 11px; color: #CBD5E1; line-height: 1.3; }
+  `;
+    /** MutationObserver to re-attach overlay host if WhatsApp removes it */
+    let hostRecoveryObserver = null;
+    /**
+     * Ensures a single, body-level Shadow DOM host exists for the overlay.
+     *
+     * Architecture:
+     *   document.body
+     *     └── #verifyfirst-overlay-host  (position:fixed, pointer-events:none)
+     *            └── ShadowRoot
+     *                   ├── <style>
+     *                   └── .overlay-card  (pointer-events:auto)
+     */
+    function ensureOverlayHost() {
+        let host = document.getElementById(OVERLAY_CONTAINER_ID);
+        let shadow;
+        let card;
+        if (host && host.shadowRoot) {
+            shadow = host.shadowRoot;
+            card = shadow.querySelector('.overlay-card');
+            if (!card) {
+                console.log("[VerifyFirst] Overlay card created");
+                card = document.createElement("div");
+                shadow.appendChild(card);
+            }
+            if (!host.parentNode) {
+                (document.body || document.documentElement).appendChild(host);
+                console.log("[VerifyFirst] Overlay host attached", { connected: document.body.contains(host), parent: host.parentElement?.tagName });
+            }
+        }
+        else {
+            if (host && host.parentNode)
+                host.parentNode.removeChild(host);
+            console.log("[VerifyFirst] Creating overlay host");
+            host = document.createElement("div");
+            host.id = OVERLAY_CONTAINER_ID;
+            host.style.position = "fixed";
+            host.style.top = "24px";
+            host.style.right = "24px";
+            host.style.zIndex = "2147483647";
+            host.style.pointerEvents = "none";
+            host.style.display = "block";
+            shadow = host.attachShadow({ mode: "open" });
+            const style = document.createElement("style");
+            style.textContent = OVERLAY_STYLES;
+            shadow.appendChild(style);
+            card = document.createElement("div");
+            console.log("[VerifyFirst] Overlay card created");
+            shadow.appendChild(card);
+            card.addEventListener("mouseenter", () => pauseDismissTimer());
+            card.addEventListener("mouseleave", () => resetDismissTimer(6000));
+            if (document.body) {
+                document.body.appendChild(host);
+                console.log("[VerifyFirst] Overlay host attached", { connected: document.body.contains(host), parent: host.parentElement?.tagName });
+            }
+            else {
+                window.addEventListener("DOMContentLoaded", () => {
+                    if (host && !host.parentNode) {
+                        document.body.appendChild(host);
+                        console.log("[VerifyFirst] Overlay host attached", { connected: document.body.contains(host), parent: host.parentElement?.tagName });
+                    }
+                }, { once: true });
+            }
+            if (!hostRecoveryObserver) {
+                hostRecoveryObserver = new MutationObserver(() => {
+                    const existing = document.getElementById(OVERLAY_CONTAINER_ID);
+                    if (!existing && activeWarningPool.length > 0) {
+                        console.log("[VerifyFirst] Overlay host removed by page, re-attaching");
+                        renderCurrentOverlayView();
+                    }
+                });
+                if (document.body)
+                    hostRecoveryObserver.observe(document.body, { childList: true });
+            }
+        }
+        return { host, shadow, card };
+    }
     function renderCurrentOverlayView(viewType) {
         if (viewType)
             currentViewType = viewType;
@@ -126,273 +287,8 @@
             return;
         }
         currentWarningUrl = record.url;
-        let host = document.getElementById(OVERLAY_CONTAINER_ID);
-        let shadow;
-        let card;
-        if (!host) {
-            host = document.createElement("div");
-            host.id = OVERLAY_CONTAINER_ID;
-            host.style.position = "fixed";
-            host.style.top = "16px";
-            host.style.right = "16px";
-            host.style.zIndex = "2147483647";
-            host.style.pointerEvents = "auto";
-            host.style.display = "block";
-            shadow = host.attachShadow({ mode: "open" });
-            const style = document.createElement("style");
-            style.textContent = `
-        :host {
-          position: fixed !important;
-          top: 16px !important;
-          right: 16px !important;
-          z-index: 2147483647 !important;
-          display: block !important;
-          pointer-events: auto !important;
-        }
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        .overlay-card {
-          width: 310px;
-          max-width: min(310px, calc(100vw - 32px));
-          min-height: auto;
-          background: #0B141A;
-          color: #F8FAFC;
-          border-radius: 12px;
-          padding: 12px 14px;
-          font-family: 'Poppins', 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-          box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.35);
-          border: 1px solid rgba(148, 163, 184, 0.22);
-          animation: vfFadeSlide 200ms ease-out;
-          pointer-events: auto;
-        }
-        @keyframes vfFadeSlide {
-          from { opacity: 0; transform: translateY(-8px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-        .overlay-card.suspicious { border: 1px solid rgba(255, 224, 130, 0.85); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55), 0 0 12px rgba(255, 224, 130, 0.2); }
-        .overlay-card.dangerous { border: 1px solid #F87171; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55), 0 0 14px rgba(248, 113, 113, 0.25); }
-        .overlay-card.analysis_unavailable, .overlay-card.unavailable { border: 1px solid rgba(148, 163, 184, 0.4); }
-
-        .header {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          padding-bottom: 6px;
-          margin-bottom: 9px;
-          border-bottom: 1px solid rgba(148, 163, 184, 0.15);
-        }
-        .brand {
-          display: flex;
-          align-items: center;
-        }
-        .brand-logo {
-          height: 30px;
-          width: auto;
-          display: block;
-        }
-        .close-btn {
-          background: transparent;
-          border: none;
-          color: #8696A0;
-          font-size: 18px;
-          cursor: pointer;
-          line-height: 1;
-          padding: 0 4px;
-          border-radius: 4px;
-          transition: color 150ms ease;
-        }
-        .close-btn:hover { color: #F8FAFC; }
-
-        .status-title {
-          font-size: 14px;
-          font-weight: 700;
-          margin-bottom: 8px;
-          display: flex;
-          align-items: center;
-          gap: 5px;
-        }
-        .suspicious .status-title { color: #FFE082; }
-        .dangerous .status-title { color: #F87171; }
-        .analysis_unavailable .status-title, .unavailable .status-title { color: #94A3B8; }
-
-        .score-row {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          background: #1E2A33;
-          border: 1px solid rgba(148, 163, 184, 0.10);
-          border-radius: 6px;
-          padding: 7px 9px;
-          margin-bottom: 8px;
-        }
-        .score-label {
-          color: #CBD5E1;
-          font-weight: 600;
-          text-transform: uppercase;
-          font-size: 10px;
-          letter-spacing: 0.5px;
-        }
-        .score-val {
-          font-weight: 700;
-          font-size: 16px;
-          color: #F8FAFC;
-        }
-
-        .explanation-text {
-          font-size: 12px;
-          line-height: 1.4;
-          color: #CBD5E1;
-          margin-bottom: 8px;
-        }
-
-        .url-box {
-          font-family: SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
-          font-size: 12px;
-          color: #E2E8F0;
-          background: #0B141A;
-          padding: 8px 10px;
-          border-radius: 5px;
-          border: 1px solid rgba(148, 163, 184, 0.18);
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-          margin-bottom: 10px;
-        }
-
-        .nav-controls {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          color: #E2E8F0;
-          font-size: 12px;
-          font-weight: 600;
-        }
-        .nav-btn {
-          background: transparent;
-          border: none;
-          color: #8696A0;
-          font-size: 16px;
-          cursor: pointer;
-          padding: 2px 8px;
-          border-radius: 4px;
-          transition: color 150ms ease, background 150ms ease;
-        }
-        .nav-btn:hover { color: #F8FAFC; background: rgba(148, 163, 184, 0.15); }
-        .nav-btn:disabled { color: rgba(134, 150, 160, 0.4); cursor: default; background: transparent; }
-
-        .actions {
-          display: flex;
-          gap: 6px;
-          justify-content: flex-end;
-        }
-        .action-col {
-          display: flex;
-          flex-direction: column;
-          gap: 8px;
-        }
-        .action-row {
-          display: flex;
-          align-items: center;
-          justify-content: flex-end;
-          gap: 6px;
-        }
-        .action-row.has-nav {
-          justify-content: space-between;
-        }
-        .btn {
-          font-size: 12px;
-          font-weight: 600;
-          padding: 6px 12px;
-          border-radius: 5px;
-          cursor: pointer;
-          border: none;
-          transition: background-color 150ms ease, color 150ms ease, opacity 150ms ease;
-        }
-        .btn-secondary {
-          background: #1E2A33;
-          border: 1px solid rgba(148, 163, 184, 0.20);
-          color: #CBD5E1;
-        }
-        .btn-secondary:hover { background: #26343B; color: #F8FAFC; }
-        .btn-primary {
-          background: #22D3EE;
-          color: #0B141A;
-        }
-        .btn-primary:hover { opacity: 0.9; }
-
-        .back-link {
-          background: transparent;
-          border: none;
-          color: #8696A0;
-          font-size: 12px;
-          font-weight: 600;
-          cursor: pointer;
-          display: flex;
-          align-items: center;
-          gap: 4px;
-          padding: 2px 4px;
-          border-radius: 4px;
-          transition: color 150ms ease;
-        }
-        .back-link:hover { color: #F8FAFC; }
-
-        .section-label {
-          font-size: 10px;
-          font-weight: 600;
-          color: #CBD5E1;
-          text-transform: uppercase;
-          letter-spacing: 0.5px;
-          margin-bottom: 6px;
-          margin-top: 6px;
-        }
-
-        .indicators-list {
-          display: flex;
-          flex-direction: column;
-          gap: 6px;
-          max-height: 160px;
-          overflow-y: auto;
-          margin-bottom: 9px;
-        }
-
-        .indicator-item {
-          background: #1E2A33;
-          border-left: 3px solid #22D3EE;
-          padding: 7px 8px;
-          border-radius: 0 5px 5px 0;
-        }
-        .suspicious .indicator-item { border-left-color: #FFE082; }
-        .dangerous .indicator-item { border-left-color: #F87171; }
-        .analysis_unavailable .indicator-item, .unavailable .indicator-item { border-left-color: #94A3B8; }
-
-        .indicator-title {
-          font-size: 12px;
-          font-weight: 700;
-          color: #F8FAFC;
-          margin-bottom: 2px;
-        }
-
-        .indicator-desc {
-          font-size: 11px;
-          color: #CBD5E1;
-          line-height: 1.3;
-        }
-      `;
-            shadow.appendChild(style);
-            card = document.createElement("div");
-            shadow.appendChild(card);
-            card.addEventListener("mouseenter", () => pauseDismissTimer());
-            card.addEventListener("mouseleave", () => resetDismissTimer(6000));
-            const targetParent = document.body || document.documentElement;
-            targetParent.appendChild(host);
-        }
-        else {
-            shadow = host.shadowRoot;
-            card = shadow.querySelector('.overlay-card');
-            if (!card) {
-                card = document.createElement("div");
-                shadow.appendChild(card);
-            }
-        }
+        console.log("[VerifyFirst] Rendering overlay", { url: currentWarningUrl, itemCount: activeWarningPool.length });
+        const { host, shadow, card } = ensureOverlayHost();
         card.className = `overlay-card ${record.status.toLowerCase()}`;
         card.innerHTML = "";
         function createBrandLogo() {
@@ -752,6 +648,16 @@
             actions.appendChild(dismissBtn);
             card.appendChild(actions);
         }
+        // --- DIAGNOSTICS START ---
+        const rect = card.getBoundingClientRect();
+        console.log("[VerifyFirst] Overlay rendered:", {
+            connected: host.isConnected,
+            width: rect.width,
+            height: rect.height,
+            top: rect.top,
+            right: window.innerWidth - rect.right
+        });
+        // --- DIAGNOSTICS END ---
     }
     function renderUnverifiedView(url) {
         resetDismissTimer(8000);
@@ -844,6 +750,7 @@
      * Displays an automatic security warning overlay inside WhatsApp Web.
      */
     function showVerifyFirstWarning(record, allRecords = [], force = false) {
+        console.log("[VerifyFirst] showOverlay entered");
         if (!record)
             return;
         try {
@@ -901,6 +808,7 @@
             showVerifyFirstWarning,
             showUnverifiedWarning,
             clearVerifyFirstOverlay,
+            hideVerifyFirstOverlay,
             resetDisplayedWarnings,
         };
     }

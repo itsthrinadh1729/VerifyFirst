@@ -1,12 +1,15 @@
 import { createRequire } from "module";
 const require = createRequire(import.meta.url);
-const { JSDOM } = require("./extension/node_modules/jsdom");
+const { JSDOM } = require("../extension/node_modules/jsdom");
 import fs from "fs";
 import path from "path";
 import assert from "assert";
+import { fileURLToPath } from "url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Load the compiled JS
-const securityCenterCode = fs.readFileSync(path.resolve("extension/content/security-center/securityCenter.js"), "utf8");
+const securityCenterCode = fs.readFileSync(path.resolve(__dirname, "..", "extension/content/security-center/securityCenter.js"), "utf8");
 
 // Setup JSDOM
 const dom = new JSDOM(`<!DOCTYPE html><html><head></head><body></body></html>`, {

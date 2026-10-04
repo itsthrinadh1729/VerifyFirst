@@ -5,7 +5,7 @@
  * 1. Validate messages received from the content script.
  * 2. Dispatch URL analysis requests to FastAPI backend (POST /api/v1/analyze).
  * 3. Safely map errors to ANALYSIS_UNAVAILABLE (never SAFE).
- * 4. Store per-tab/per-chat analysis results for the popup interface.
+ * 4. Store per-tab/per-chat analysis results for the Security Center.
  * 5. Handle chat context isolation on conversation switch.
  */
 import { createSecurityEvent, createFileSecurityEvent, createMessageSecurityEvent } from "./security/event.js";
