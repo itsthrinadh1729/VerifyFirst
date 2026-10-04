@@ -738,7 +738,40 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
 });
 console.log("VerifyFirst service worker initialized (Phase 2 Pre-interaction Detection)");
-// Removed chrome.action.onClicked listener because default_popup is defined in manifest
+// Open Security Center directly when extension icon is clicked (no popup)
+chrome.action.onClicked.addListener(async (tab) => {
+    // If the active tab is WhatsApp Web, open Security Center there
+    if (tab && tab.url && tab.url.includes("web.whatsapp.com") && tab.id !== undefined) {
+        console.log(`[VerifyFirst] Icon clicked on WhatsApp tab ${tab.id}, opening Security Center`);
+        chrome.tabs.sendMessage(tab.id, { type: "OPEN_SECURITY_CENTER" }).catch(() => {
+            // Content script may not be ready, try again after a brief delay
+            setTimeout(() => {
+                chrome.tabs.sendMessage(tab.id, { type: "OPEN_SECURITY_CENTER" }).catch(() => {
+                    console.log("[VerifyFirst] Could not reach content script on WhatsApp tab");
+                });
+            }, 500);
+        });
+        return;
+    }
+    // Not on WhatsApp — find an existing WhatsApp tab and switch to it
+    const tabs = await chrome.tabs.query({ url: "https://web.whatsapp.com/*" });
+    if (tabs && tabs.length > 0) {
+        const waTab = tabs[0];
+        console.log(`[VerifyFirst] Icon clicked on non-WhatsApp tab, switching to WhatsApp tab ${waTab.id}`);
+        await chrome.tabs.update(waTab.id, { active: true });
+        await chrome.windows.update(waTab.windowId, { focused: true });
+        // Send OPEN_SECURITY_CENTER after the tab is focused
+        setTimeout(() => {
+            chrome.tabs.sendMessage(waTab.id, { type: "OPEN_SECURITY_CENTER" }).catch(() => {
+                console.log("[VerifyFirst] Could not reach content script after tab switch");
+            });
+        }, 300);
+        return;
+    }
+    // No WhatsApp tab open — open WhatsApp Web
+    console.log("[VerifyFirst] No WhatsApp tab found, opening web.whatsapp.com");
+    chrome.tabs.create({ url: "https://web.whatsapp.com" });
+});
 /**
  * 4D Privacy Hardening: Tab state cleanup
  * Ensure that full message strings/cache states are cleared from

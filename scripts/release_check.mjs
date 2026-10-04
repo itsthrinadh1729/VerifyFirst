@@ -39,9 +39,9 @@ if (!fs.existsSync(manifestPath)) {
     error('Required icons missing from manifest');
   } else success('Required icons present in manifest');
 
-  if (!manifest.action || !manifest.action.default_popup) {
-    error('Popup missing in action');
-  } else success('Popup present in action');
+  if (manifest.action && manifest.action.default_popup) {
+    error('Legacy default_popup found in manifest — must be removed (chrome.action.onClicked is the entry point)');
+  } else success('No default_popup in action (chrome.action.onClicked is the entry point)');
 
   if (!manifest.background || !manifest.background.service_worker) {
     error('Service worker missing');
@@ -58,7 +58,7 @@ if (!fs.existsSync(manifestPath)) {
     }
   }
 
-  if (manifest.action.default_popup) checkExists(manifest.action.default_popup);
+  // default_popup intentionally removed — chrome.action.onClicked is the entry point
   if (manifest.background.service_worker) checkExists(manifest.background.service_worker);
   manifest.content_scripts.forEach(cs => {
     if (cs.css) cs.css.forEach(checkExists);

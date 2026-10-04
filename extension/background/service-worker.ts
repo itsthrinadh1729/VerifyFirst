@@ -872,9 +872,11 @@ chrome.action.onClicked.addListener(async (tab: any) => {
   // If the active tab is WhatsApp Web, open Security Center there
   if (tab && tab.url && tab.url.includes("web.whatsapp.com") && tab.id !== undefined) {
     console.log(`[VerifyFirst] Icon clicked on WhatsApp tab ${tab.id}, opening Security Center`);
+    chrome.tabs.sendMessage(tab.id, { type: "CLOSE_VERIFYFIRST_OVERLAY" }).catch(() => {});
     chrome.tabs.sendMessage(tab.id, { type: "OPEN_SECURITY_CENTER" }).catch(() => {
       // Content script may not be ready, try again after a brief delay
       setTimeout(() => {
+        chrome.tabs.sendMessage(tab.id!, { type: "CLOSE_VERIFYFIRST_OVERLAY" }).catch(() => {});
         chrome.tabs.sendMessage(tab.id!, { type: "OPEN_SECURITY_CENTER" }).catch(() => {
           console.log("[VerifyFirst] Could not reach content script on WhatsApp tab");
         });
@@ -890,8 +892,9 @@ chrome.action.onClicked.addListener(async (tab: any) => {
     console.log(`[VerifyFirst] Icon clicked on non-WhatsApp tab, switching to WhatsApp tab ${waTab.id}`);
     await chrome.tabs.update(waTab.id!, { active: true });
     await chrome.windows.update(waTab.windowId!, { focused: true });
-    // Send OPEN_SECURITY_CENTER after the tab is focused
+    // Send CLOSE and OPEN after the tab is focused
     setTimeout(() => {
+      chrome.tabs.sendMessage(waTab.id!, { type: "CLOSE_VERIFYFIRST_OVERLAY" }).catch(() => {});
       chrome.tabs.sendMessage(waTab.id!, { type: "OPEN_SECURITY_CENTER" }).catch(() => {
         console.log("[VerifyFirst] Could not reach content script after tab switch");
       });

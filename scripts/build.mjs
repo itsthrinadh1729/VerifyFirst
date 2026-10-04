@@ -26,7 +26,7 @@ fs.mkdirSync(stagingDir, { recursive: true });
 
 // 3. Copy files
 console.log('Copying runtime files...');
-const dirsToCopy = ['assets', 'background', 'content', 'popup', 'shared'];
+const dirsToCopy = ['assets', 'background', 'content', 'shared'];
 for (const dir of dirsToCopy) {
   const src = path.join(extDir, dir);
   const dest = path.join(stagingDir, dir);

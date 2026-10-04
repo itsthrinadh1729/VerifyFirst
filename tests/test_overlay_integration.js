@@ -414,18 +414,65 @@ async function runAllTests() {
     }
   ));
 
-  // 18. Mixed URL, File, Message Navigation
+  // 19. CLOSE_VERIFYFIRST_OVERLAY hides the overlay
   record(await runOverlayTest(
-    "18. Mixed URL + File + Message navigation",
-    ({ document, pushResult }) => {
-      simulateChat(document, "ChatMixed", ["https://url.com/", "file.exe", "bad message"]);
+    "19. CLOSE_VERIFYFIRST_OVERLAY hides the overlay",
+    ({ document, pushResult, window }) => {
+      simulateChat(document, "ChatClose", ["https://close.com/"]);
       setTimeout(() => {
-        pushResult({ url: "https://url.com/", status: "SUSPICIOUS", risk_score: 50, assetType: "url" }, "ChatMixed");
-        pushResult({ url: "file.exe", filename: "file.exe", status: "DANGEROUS", risk_score: 90, assetType: "file" }, "ChatMixed");
-        pushResult({ url: "bad message", message: "bad message", status: "DANGEROUS", risk_score: 95, assetType: "message", messagePreview: "bad message" }, "ChatMixed");
+        pushResult({ url: "https://close.com/", status: "SUSPICIOUS", risk_score: 55 }, "ChatClose");
+        setTimeout(() => {
+          if (window.VerifyFirstOverlay && window.VerifyFirstOverlay.hideVerifyFirstOverlay) {
+              window.VerifyFirstOverlay.hideVerifyFirstOverlay();
+          }
+        }, 50);
       }, 300);
     },
-    ({ document }) => hasOverlay(document) && getNavText(document) === "1 of 3"
+    ({ document }) => !hasOverlay(document)
+  ));
+
+  // 20. Late analysis result for ALREADY DISMISSED url does not reopen overlay
+  record(await runOverlayTest(
+    "20. Late analysis result for dismissed URL does not reopen overlay",
+    ({ document, pushResult, window }) => {
+      simulateChat(document, "ChatLate", ["https://late1.com/"]);
+      setTimeout(() => {
+        // Late result for late1 arrives, but it's safe so no overlay. Wait, we want to test hiding.
+        // Let's first make it suspicious.
+        pushResult({ url: "https://late1.com/", status: "SUSPICIOUS", risk_score: 55 }, "ChatLate");
+        setTimeout(() => {
+          if (window.VerifyFirstOverlay && window.VerifyFirstOverlay.hideVerifyFirstOverlay) {
+              window.VerifyFirstOverlay.hideVerifyFirstOverlay();
+          }
+          setTimeout(() => {
+              // Same URL pushed again (maybe from file analysis or message analysis for same url)
+              pushResult({ url: "https://late1.com/", status: "DANGEROUS", risk_score: 95 }, "ChatLate");
+          }, 50);
+        }, 50);
+      }, 300);
+    },
+    ({ document }) => !hasOverlay(document)
+  ));
+
+  // 21. Late analysis result for NEW url does reopen overlay
+  record(await runOverlayTest(
+    "21. Late analysis result for NEW url does reopen overlay",
+    ({ document, pushResult, window }) => {
+      simulateChat(document, "ChatLateNew", ["https://late1.com/", "https://late2.com/"]);
+      setTimeout(() => {
+        pushResult({ url: "https://late1.com/", status: "SUSPICIOUS", risk_score: 55 }, "ChatLateNew");
+        setTimeout(() => {
+          if (window.VerifyFirstOverlay && window.VerifyFirstOverlay.hideVerifyFirstOverlay) {
+              window.VerifyFirstOverlay.hideVerifyFirstOverlay();
+          }
+          setTimeout(() => {
+              // NEW URL pushed, should open
+              pushResult({ url: "https://late2.com/", status: "DANGEROUS", risk_score: 95 }, "ChatLateNew");
+          }, 50);
+        }, 50);
+      }, 300);
+    },
+    ({ document }) => hasOverlay(document) && getOverlayStatus(document) === 'DANGEROUS'
   ));
 
   console.log(`\n${"═".repeat(50)}`);

@@ -981,6 +981,17 @@
                     });
                     return false;
                 }
+                if (message && message.type === "CLOSE_VERIFYFIRST_OVERLAY") {
+                    console.log(`[VerifyFirst] CLOSE_VERIFYFIRST_OVERLAY received`);
+                    if (typeof window.VerifyFirstOverlay?.hideVerifyFirstOverlay === "function") {
+                        window.VerifyFirstOverlay.hideVerifyFirstOverlay();
+                    }
+                    else if (typeof window.VerifyFirstOverlay?.clearVerifyFirstOverlay === "function") {
+                        window.VerifyFirstOverlay.clearVerifyFirstOverlay();
+                    }
+                    sendResponse({ closed: true });
+                    return false;
+                }
                 // Don't return false for unrecognized messages — let other listeners handle them
             });
             console.log("[VerifyFirst] ANALYSIS_RESULT listener registered");

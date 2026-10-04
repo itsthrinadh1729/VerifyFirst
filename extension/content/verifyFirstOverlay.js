@@ -79,6 +79,19 @@
         clearVerifyFirstOverlay();
     }
     /**
+     * Hides the overlay and marks all currently pooled warnings as dismissed
+     * so they don't pop back up if a late analysis result arrives.
+     */
+    function hideVerifyFirstOverlay() {
+        // Add all current warnings to dismissed set
+        for (const record of activeWarningPool) {
+            if (record.url) {
+                dismissedWarnings.add(record.url.trim().toLowerCase());
+            }
+        }
+        clearVerifyFirstOverlay();
+    }
+    /**
      * Displays an automatic security warning overlay inside WhatsApp Web.
      */
     function handleDismiss() {
@@ -795,6 +808,7 @@
             showVerifyFirstWarning,
             showUnverifiedWarning,
             clearVerifyFirstOverlay,
+            hideVerifyFirstOverlay,
             resetDisplayedWarnings,
         };
     }
