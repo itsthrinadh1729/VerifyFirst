@@ -676,6 +676,7 @@
           chatId: requestChatId,
         }, (response) => {
           console.log(`[VerifyFirst] ANALYZE_URL callback for ${url}:`, response);
+          console.log("[VerifyFirst] ANALYSIS_RESULT received", response);
           if (!response || !response.success || !response.record) {
             console.log(`[VerifyFirst] Callback dropped: invalid response`);
             return;
@@ -705,6 +706,7 @@
           if (response.record.status !== "SAFE") {
             if (typeof window !== "undefined" && (window as any).VerifyFirstOverlay) {
               try {
+                console.log("[VerifyFirst] Calling showOverlay");
                 (window as any).VerifyFirstOverlay.showVerifyFirstWarning(response.record, Object.values(currentChatRecords));
               } catch (e: any) {
                 console.error(`[VerifyFirst] Error displaying overlay: ${e?.message || e}`);
@@ -922,6 +924,7 @@
     // Trigger automatic warning for SUSPICIOUS, DANGEROUS, ANALYSIS_UNAVAILABLE
     if (typeof window !== "undefined" && (window as any).VerifyFirstOverlay) {
       try {
+        console.log("[VerifyFirst] Calling showOverlay");
         (window as any).VerifyFirstOverlay.showVerifyFirstWarning(record, Object.values(currentChatRecords));
       } catch (e: any) {
         console.error(`[VerifyFirst] Error displaying overlay: ${e?.message || e}`);
@@ -1070,6 +1073,7 @@
         }
 
         if (message && message.type === "ANALYSIS_RESULT" && message.record) {
+          console.log("[VerifyFirst] ANALYSIS_RESULT received", message);
           handleAnalysisResult(message.record, message.chatId);
           sendResponse({ received: true });
           return false;

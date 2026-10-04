@@ -157,9 +157,6 @@ interface OverlayAnalysisRecord {
         position: fixed !important;
         top: 24px !important;
         right: 24px !important;
-        width: 0 !important;
-        height: 0 !important;
-        overflow: visible !important;
         z-index: 2147483647 !important;
         display: block !important;
         pointer-events: none !important;
@@ -247,23 +244,23 @@ interface OverlayAnalysisRecord {
       shadow = host.shadowRoot;
       card = shadow.querySelector('.overlay-card') as HTMLDivElement;
       if (!card) {
+        console.log("[VerifyFirst] Overlay card created");
         card = document.createElement("div");
         shadow.appendChild(card);
       }
       if (!host.parentNode) {
         (document.body || document.documentElement).appendChild(host);
+        console.log("[VerifyFirst] Overlay host attached", { connected: document.body.contains(host), parent: host.parentElement?.tagName });
       }
     } else {
       if (host && host.parentNode) host.parentNode.removeChild(host);
 
+      console.log("[VerifyFirst] Creating overlay host");
       host = document.createElement("div");
       host.id = OVERLAY_CONTAINER_ID;
       host.style.position = "fixed";
       host.style.top = "24px";
       host.style.right = "24px";
-      host.style.width = "0";
-      host.style.height = "0";
-      host.style.overflow = "visible";
       host.style.zIndex = "2147483647";
       host.style.pointerEvents = "none";
       host.style.display = "block";
@@ -274,15 +271,20 @@ interface OverlayAnalysisRecord {
       shadow.appendChild(style);
 
       card = document.createElement("div");
+      console.log("[VerifyFirst] Overlay card created");
       shadow.appendChild(card);
       card.addEventListener("mouseenter", () => pauseDismissTimer());
       card.addEventListener("mouseleave", () => resetDismissTimer(6000));
 
       if (document.body) {
         document.body.appendChild(host);
+        console.log("[VerifyFirst] Overlay host attached", { connected: document.body.contains(host), parent: host.parentElement?.tagName });
       } else {
         window.addEventListener("DOMContentLoaded", () => {
-          if (host && !host.parentNode) document.body.appendChild(host);
+          if (host && !host.parentNode) {
+            document.body.appendChild(host);
+            console.log("[VerifyFirst] Overlay host attached", { connected: document.body.contains(host), parent: host.parentElement?.tagName });
+          }
         }, { once: true });
       }
 
@@ -309,7 +311,9 @@ interface OverlayAnalysisRecord {
     }
     currentWarningUrl = record.url;
 
-    const { card } = ensureOverlayHost();
+    console.log("[VerifyFirst] Rendering overlay", { url: currentWarningUrl, itemCount: activeWarningPool.length });
+
+    const { host, shadow, card } = ensureOverlayHost();
 
     card.className = `overlay-card ${record.status.toLowerCase()}`;
     card.innerHTML = "";
@@ -685,6 +689,17 @@ interface OverlayAnalysisRecord {
       actions.appendChild(dismissBtn);
       card.appendChild(actions);
     }
+
+    // --- DIAGNOSTICS START ---
+    const rect = card.getBoundingClientRect();
+    console.log("[VerifyFirst] Overlay rendered:", {
+        connected: host.isConnected,
+        width: rect.width,
+        height: rect.height,
+        top: rect.top,
+        right: window.innerWidth - rect.right
+    });
+    // --- DIAGNOSTICS END ---
   }
 
   function renderUnverifiedView(url: string): void {
@@ -787,6 +802,7 @@ interface OverlayAnalysisRecord {
    * Displays an automatic security warning overlay inside WhatsApp Web.
    */
   function showVerifyFirstWarning(record: OverlayAnalysisRecord, allRecords: OverlayAnalysisRecord[] = [], force: boolean = false): void {
+    console.log("[VerifyFirst] showOverlay entered");
     if (!record) return;
     try {
       const u = new URL(record.url);
