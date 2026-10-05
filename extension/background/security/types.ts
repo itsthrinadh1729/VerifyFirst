@@ -36,6 +36,9 @@ export interface SecurityEvent {
   reasons: SecurityEventReason[];
 
   threatContext?: SecurityEventThreatContext;
+
+  /** Internal transient key for short-term deduplication. Not persisted to storage. */
+  _dedupIdentity?: string;
 }
 
 export interface SecurityStatistics {

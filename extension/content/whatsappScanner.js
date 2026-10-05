@@ -500,17 +500,26 @@
         });
         return found;
     }
+    let delayedScanTimers = [];
+    function clearDelayedScans() {
+        for (const timer of delayedScanTimers) {
+            window.clearTimeout(timer);
+        }
+        delayedScanTimers = [];
+    }
     /**
      * Schedules a single delayed scan for catching async-rendered messages.
      */
     function scheduleDelayedScan(delayMs) {
         if (extensionContextInvalid)
             return;
-        window.setTimeout(() => {
+        const timer = window.setTimeout(() => {
+            delayedScanTimers = delayedScanTimers.filter(t => t !== timer);
             if (!extensionContextInvalid && isContextValid()) {
                 scanActiveChatForUrls(false);
             }
         }, delayMs);
+        delayedScanTimers.push(timer);
     }
     /**
      * Scans the active conversation container for new external links.
@@ -560,6 +569,7 @@
                 type: "CHAT_SWITCHED",
                 chatId: activeChatId,
             });
+            clearDelayedScans();
             // Schedule retry scans — WhatsApp renders messages asynchronously
             scheduleDelayedScan(500);
             scheduleDelayedScan(1500);
@@ -1047,20 +1057,6 @@
             observerInstance.disconnect();
             observerInstance = null;
         }
-        currentChatId = "";
-        discoveredUrls.clear();
-        currentChatRecords = {};
-        discoveredFiles.clear();
-        currentFileRecords = {};
-        discoveredMessages.clear();
-        currentMessageRecords = {};
-        if (typeof window !== "undefined" && window.VerifyFirstOverlay) {
-            window.VerifyFirstOverlay.resetDisplayedWarnings();
-        }
-        safeSendMessage({
-            type: "CHAT_SWITCHED",
-            chatId: "",
-        });
         currentObservedContainer = container;
         if (container) {
             console.log("[VerifyFirst] Attached observer to new chat container");
@@ -1079,6 +1075,7 @@
         }
         else {
             console.log("[VerifyFirst] No chat container currently active to observe");
+            scanActiveChatForUrls(true);
         }
     }
     // Start observing once DOM is ready

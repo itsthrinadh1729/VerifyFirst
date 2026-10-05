@@ -194,6 +194,7 @@ async function handleAnalyzeUrl(tabId, url) {
             try {
                 const secEvent = createSecurityEvent(record, trimmed);
                 if (secEvent) {
+                    secEvent._dedupIdentity = `url|${trimmed}|${record.status}|${capturedGeneration}`;
                     record.eventId = secEvent.id;
                     // Fire and forget, don't block protection flow
                     recordHistory(secEvent).catch(e => console.error("[VerifyFirst] Deferred history error:", e));
@@ -335,6 +336,7 @@ async function handleAnalyzeFile(tabId, filename) {
             try {
                 const secEvent = createFileSecurityEvent(record, trimmed);
                 if (secEvent) {
+                    secEvent._dedupIdentity = `file|${trimmed}|${record.status}|${capturedGeneration}`;
                     record.eventId = secEvent.id;
                     recordHistory(secEvent).catch(e => console.error("[VerifyFirst] Deferred file history error:", e));
                 }
@@ -466,6 +468,7 @@ async function handleAnalyzeMessage(tabId, message) {
             try {
                 const secEvent = createMessageSecurityEvent(record, trimmed);
                 if (secEvent) {
+                    secEvent._dedupIdentity = `message|${fingerprint}|${record.status}|${capturedGeneration}`;
                     record.eventId = secEvent.id;
                     recordHistory(secEvent).catch(e => console.error("[VerifyFirst] Deferred message history error:", e));
                 }

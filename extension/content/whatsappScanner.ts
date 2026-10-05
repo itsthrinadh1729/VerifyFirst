@@ -573,16 +573,27 @@
     return found;
   }
 
+  let delayedScanTimers: number[] = [];
+
+  function clearDelayedScans(): void {
+    for (const timer of delayedScanTimers) {
+      window.clearTimeout(timer);
+    }
+    delayedScanTimers = [];
+  }
+
   /**
    * Schedules a single delayed scan for catching async-rendered messages.
    */
   function scheduleDelayedScan(delayMs: number): void {
     if (extensionContextInvalid) return;
-    window.setTimeout(() => {
+    const timer = window.setTimeout(() => {
+      delayedScanTimers = delayedScanTimers.filter(t => t !== timer);
       if (!extensionContextInvalid && isContextValid()) {
         scanActiveChatForUrls(false);
       }
     }, delayMs);
+    delayedScanTimers.push(timer);
   }
 
   /**
@@ -635,6 +646,8 @@
         type: "CHAT_SWITCHED",
         chatId: activeChatId,
       });
+
+      clearDelayedScans();
 
       // Schedule retry scans — WhatsApp renders messages asynchronously
       scheduleDelayedScan(500);
@@ -1180,20 +1193,6 @@
       observerInstance.disconnect();
       observerInstance = null;
     }
-    currentChatId = "";
-    discoveredUrls.clear();
-    currentChatRecords = {};
-    discoveredFiles.clear();
-    currentFileRecords = {};
-    discoveredMessages.clear();
-    currentMessageRecords = {};
-    if (typeof window !== "undefined" && (window as any).VerifyFirstOverlay) {
-      (window as any).VerifyFirstOverlay.resetDisplayedWarnings();
-    }
-    safeSendMessage({
-      type: "CHAT_SWITCHED",
-      chatId: "",
-    });
 
     currentObservedContainer = container;
 
@@ -1217,6 +1216,7 @@
 
     } else {
       console.log("[VerifyFirst] No chat container currently active to observe");
+      scanActiveChatForUrls(true);
     }
   }
 

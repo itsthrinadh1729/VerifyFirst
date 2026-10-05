@@ -2,6 +2,9 @@ const HISTORY_KEY = "verifyfirst_security_history";
 export const MAX_HISTORY_EVENTS = 1000;
 // Used to serialize concurrent writes
 let writeLock = Promise.resolve();
+// Transient cache for deduplicating identical recent encounters (e.g., from DOM rescans)
+const recentEncounters = new Map();
+const DEDUP_WINDOW_MS = 60 * 1000; // 60 seconds
 /**
  * Retrieves all security events from history, ordered oldest to newest.
  */
@@ -38,12 +41,31 @@ export async function getRecent(limit) {
 export function record(event) {
     const nextLock = writeLock.then(async () => {
         try {
+            const now = Date.now();
+            // Deduplication check
+            if (event._dedupIdentity) {
+                const lastSeen = recentEncounters.get(event._dedupIdentity);
+                if (lastSeen && (now - lastSeen) < DEDUP_WINDOW_MS) {
+                    console.log(`[VerifyFirst] Suppressing duplicate history event for encounter: ${event._dedupIdentity}`);
+                    return;
+                }
+                recentEncounters.set(event._dedupIdentity, now);
+                // Cleanup old entries
+                for (const [key, timestamp] of recentEncounters.entries()) {
+                    if (now - timestamp >= DEDUP_WINDOW_MS) {
+                        recentEncounters.delete(key);
+                    }
+                }
+            }
+            // Strip transient identity before persistence to maintain privacy
+            const eventToStore = { ...event };
+            delete eventToStore._dedupIdentity;
             if (!chrome || !chrome.storage || !chrome.storage.local) {
                 return;
             }
             const result = await chrome.storage.local.get(HISTORY_KEY);
             let events = Array.isArray(result[HISTORY_KEY]) ? result[HISTORY_KEY] : [];
-            events.push(event);
+            events.push(eventToStore);
             if (events.length > MAX_HISTORY_EVENTS) {
                 events = events.slice(events.length - MAX_HISTORY_EVENTS);
             }
